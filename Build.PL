@@ -7,7 +7,11 @@ my $builder = Module::Build->new(
     license           => 'perl',
     dist_author       => q{Clinton Gormley <drtech@cpan.org>},
     dist_version_from => 'lib/ElasticSearch/SearchBuilder.pm',
-    build_requires    => { 'Test::More' => 0, 'Test::Most' => 0 },
+    build_requires    => {
+        'Test::More'        => 0,
+        'Test::Differences' => 0,
+        'Test::Exception'   => 0
+    },
     configure_requires => { 'Module::Build' => 0.38 },
     add_to_cleanup     => ['ElasticSearch-SearchBuilder-*'],
     create_makefile_pl => 'traditional',
