@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 my %SPECIAL_OPS = (
     query => {
@@ -278,7 +278,7 @@ sub _negate_clause {
 #===================================
     my ( $self, $type, $clause ) = @_;
     return $type eq 'filter'
-        ? { not => $clause }
+        ? { not => { filter => $clause } }
         : $self->_merge_bool_queries( 'must_not', [$clause] );
 }
 
@@ -393,6 +393,7 @@ sub _merge_range_clauses {
 #======================================================================
 
 #===================================
+sub _query_unary_all { shift->_unary_all( 'query', shift ) }
 sub _query_unary_or  { shift->_unary_and( 'query', shift, 'or' ) }
 sub _query_unary_and { shift->_unary_and( 'query', shift, 'and' ) }
 sub _query_unary_not { shift->_unary_not( 'query', shift, ) }
@@ -401,12 +402,30 @@ sub _query_unary_has_child { shift->_unary_child( 'query', shift ) }
 #===================================
 
 #===================================
+sub _filter_unary_all { shift->_unary_all( 'filter', shift ) }
 sub _filter_unary_or  { shift->_unary_and( 'filter', shift, 'or' ) }
 sub _filter_unary_and { shift->_unary_and( 'filter', shift, 'and' ) }
 sub _filter_unary_not { shift->_unary_not( 'filter', shift, ) }
 sub _filter_unary_ids { shift->_unary_ids( 'filter', shift ) }
 sub _filter_unary_has_child { shift->_unary_child( 'filter', shift ) }
 #===================================
+
+#===================================
+sub _unary_all {
+#===================================
+    my ( $self, $type, $v ) = @_;
+    $v = {} unless $v and ref $v eq 'HASH';
+    $self->_SWITCH_refkind(
+        "Unary -all",
+        $v,
+        {   HASHREF => sub {
+                my $p = $self->_hash_params( 'all', $v, [],
+                    $type eq 'query' ? [ 'boost', 'norms_field' ] : [] );
+                return { match_all => $p };
+            },
+        }
+    );
+}
 
 #===================================
 sub _unary_and {
@@ -502,10 +521,11 @@ sub _unary_child {
         "Unary $type -has_child",
         $v,
         {   HASHREF => sub {
-                my $p
-                    = $self->_hash_params( 'has_child', $v,
+                my $p = $self->_hash_params(
+                    'has_child', $v,
                     [ 'query', 'type' ],
-                    ['_scope'] );
+                    $type eq 'query' ? [ 'boost', '_scope' ] : ['_scope']
+                );
                 $p->{query} = $self->_recurse( 'query', $p->{query} );
                 return { has_child => $p };
             },
@@ -561,7 +581,7 @@ sub _query_unary_flt {
                 my $p = $self->_hash_params(
                     'flt', $v,
                     ['like_text'],
-                    [   qw(boost fields ignore_tf max_query_terms
+                    [   qw(analyzer boost fields ignore_tf max_query_terms
                             min_similarity prefix_length )
                     ]
                 );
@@ -583,7 +603,7 @@ sub _query_unary_mlt {
                 my $p = $self->_hash_params(
                     'mlt', $v,
                     ['like_text'],
-                    [   qw(boost boost_terms fields
+                    [   qw(analyzer boost boost_terms fields
                             max_doc_freq max_query_terms max_word_len
                             min_doc_freq min_term_freq min_word_len
                             percent_terms_to_match stop_words )
@@ -939,7 +959,7 @@ sub _query_field_mlt {
                 my $p = $self->_hash_params(
                     $op, $val,
                     ['like_text'],
-                    [   qw( boost boost_terms max_doc_freq
+                    [   qw( analyzer boost boost_terms max_doc_freq
                             max_query_terms max_word_len min_doc_freq
                             min_term_freq min_word_len
                             percent_terms_to_match stop_words )
@@ -971,7 +991,7 @@ sub _query_field_flt {
                 my $p = $self->_hash_params(
                     $op, $val,
                     ['like_text'],
-                    [   qw( boost ignore_tf max_query_terms
+                    [   qw( analyzer boost ignore_tf max_query_terms
                             min_similarity prefix_length)
                     ]
                 );
@@ -1324,13 +1344,15 @@ ElasticSearch::SearchBuilder - A Perlish compact query language for ElasticSearc
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
+
+Compatible with ElasticSearch version 0.16
 
 =cut
 
 =head1 DESCRIPTION
 
-The Query DSL for ElasticSearch (see L<http://www.elasticsearch.org/guide/reference/query-dsl>),
+The Query DSL for ElasticSearch (see L<Query DSL|http://www.elasticsearch.org/guide/reference/query-dsl>),
 which is used to write queries and filters,
 is simple but verbose, which can make it difficult to write and understand
 large queries.
@@ -1498,8 +1520,8 @@ Switch from query context to filter context:
     # no query, just a filter:
     { -filter => { status => 'active' }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/filtered-query.html>
-and L<http://www.elasticsearch.org/guide/reference/query-dsl/constant-score-query.html>
+See L<Filtered Query|http://www.elasticsearch.org/guide/reference/query-dsl/filtered-query.html>
+and L<Constant Score Query|http://www.elasticsearch.org/guide/reference/query-dsl/constant-score-query.html>
 
 =head3 -query | -not_query
 
@@ -1519,7 +1541,7 @@ Use a query as a filter:
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/query-filter.html>
+See L<Query Filter|http://www.elasticsearch.org/guide/reference/query-dsl/query-filter.html>
 
 =head2 KEY-VALUE PAIRS
 
@@ -1632,27 +1654,11 @@ in query context, and C<and>, C<or> and C<not> clauses when in filter
 context.
 
 See:
-
-=over
-
-=item *
-
-L<http://www.elasticsearch.org/guide/reference/query-dsl/bool-query.html>
-
-=item *
-
-L<http://www.elasticsearch.org/guide/reference/query-dsl/and-filter.html>
-
-=item *
-
-L<http://www.elasticsearch.org/guide/reference/query-dsl/or-filter.html>
-
-=item *
-
-L<http://www.elasticsearch.org/guide/reference/query-dsl/not-filter.html>
-
-=back
-
+L<Bool Query|http://www.elasticsearch.org/guide/reference/query-dsl/bool-query.html>,
+L<And Filter|http://www.elasticsearch.org/guide/reference/query-dsl/and-filter.html>,
+L<Or Filter|http://www.elasticsearch.org/guide/reference/query-dsl/or-filter.html>
+and
+L<Not Filter|http://www.elasticsearch.org/guide/reference/query-dsl/not-filter.html>
 
 
 =head2 FIELD OPERATORS
@@ -1762,6 +1768,27 @@ Unary operators may also be prefixed with C<not_> to negate their meaning.
 
 =cut
 
+=head1 MATCH ALL
+
+=head2 -all
+
+The C<-all> operator matches all documents:
+
+    # match all
+    { -all => 1  }
+    { -all => 0  }
+    { -all => {} }
+
+In query context, the C<match_all> query usually scores all docs as
+1 (ie having the same relevance). By specifying a C<norms_field>, the
+relevance can be read from that field (at the cost of a slower execution time):
+
+    # Query context only
+    { -all =>{
+        boost       => 1,
+        norms_field => 'doc_boost'
+    }}
+
 =head1 EQUALITY
 
 These operators answer the question: "Does this field contain this term?"
@@ -1773,7 +1800,7 @@ C<analyzed> fields.
 
 =head2 EQUALITY (QUERIES)
 
-=head3 = | text | != | <> | not_text
+=head3 = | -text | != | <> | -not_text
 
 These operators all generate C<text> queries:
 
@@ -1804,9 +1831,9 @@ These operators all generate C<text> queries:
 Operators C<< <> >>, C<!=> and C<not_text> are synonyms for each other and
 just wrap the operator in a C<not> clause.
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+See L<Text Query|http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
 
-=head3 == | phrase | not_phrase
+=head3 == | -phrase | -not_phrase
 
 These operators look for a complete phrase.
 
@@ -1833,9 +1860,9 @@ same order, but further apart:
             boost    => 1,
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+See L<Text Query|http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
 
-=head3 term | terms | not_term | not_terms
+=head3 -term | -terms | -not_term | -not_terms
 
 The C<term>/C<terms> operators are provided for completeness.  You
 should almost always use the C<text>/C<=> operator instead.
@@ -1871,7 +1898,7 @@ C<term> and C<terms> are synonyms, as are C<not_term> and C<not_terms>.
 
 =head2 EQUALITY (FILTERS)
 
-=head3 = | term | terms | <> | != | not_term | not_terms
+=head3 = | -term | -terms | <> | != | -not_term | -not_terms
 
 These operators result in C<term> or C<terms> filters, which look for
 fields which contain exactly the terms specified:
@@ -1896,13 +1923,13 @@ C<< <> >> and C<!=> are synonyms:
     { foo => { '!=' => ['bar','baz'] }}
     { foo => { '<>' => ['bar','baz'] }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/term-filter.html>
-and L<http://www.elasticsearch.org/guide/reference/query-dsl/terms-filter.html>
+See L<Term Filter|http://www.elasticsearch.org/guide/reference/query-dsl/term-filter.html>
+and L<Terms Filter|http://www.elasticsearch.org/guide/reference/query-dsl/terms-filter.html>
 
 
 =head1 RANGES
 
-=head2 lt | gt | lte | gte | < | <= | >= | > | range | not_range
+=head2 lt | gt | lte | gte | < | <= | >= | > | -range | -not_range
 
 These operators imply a range query or filter, which can be numeric or
 alphabetical.
@@ -1932,7 +1959,7 @@ alphabetical.
 
 For queries, C<< < >> is a synonym for C<lt>, C<< > >> for C<gt> etc.
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/range-query.html>
+See L<Range Query|http://www.elasticsearch.org/guide/reference/query-dsl/range-query.html>
 
 B<Note>: for filter clauses, the C<gt>,C<gte>,C<lt> and C<lte> operators
 imply a C<range> filter, while the C<< < >>, C<< <= >>, C<< > >> and C<< >= >>
@@ -1946,8 +1973,8 @@ have many distinct values, eg C<ID> or C<last_modified>.  If you have a numeric
 field with few distinct values, eg C<number_of_fingers> then it is better
 to use a C<range> filter.
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/range-filter.html>
-and L<http://www.elasticsearch.org/guide/reference/query-dsl/numeric-range-filter.html>.
+See L<Range Filter|http://www.elasticsearch.org/guide/reference/query-dsl/range-filter.html>
+and L<Numeric Range Filter|http://www.elasticsearch.org/guide/reference/query-dsl/numeric-range-filter.html>.
 
 =head1 MISSING OR NULL VALUES
 
@@ -1969,8 +1996,8 @@ particular field exists and has a value, or is undefined or has no value:
     { -missing => 'foo'           }
     { foo      => undef           }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/missing-filter.html>
-and L<http://www.elasticsearch.org/guide/reference/query-dsl/exists-filter.html>
+See L<Missing Filter|http://www.elasticsearch.org/guide/reference/query-dsl/missing-filter.html>
+and L<Exists Filter|http://www.elasticsearch.org/guide/reference/query-dsl/exists-filter.html>
 
 =head1 FULL TEXT SEARCH
 
@@ -1980,10 +2007,10 @@ For most full text search queries, the C<text> queries are what you
 want.  These analyze the search terms, and look for documents that
 contain one or more of those terms. (See L</"EQUALITY (QUERIES)">).
 
-=head2 qs | query_string | not_qs | not_query_string
+=head2 -qs | -query_string | -not_qs | -not_query_string
 
 However, there is a more advanced query string syntax
-(see L<http://lucene.apache.org/java/3_2_0/queryparsersyntax.html>)
+(see L<Lucene Query Parser Syntax|http://lucene.apache.org/java/3_3_0/queryparsersyntax.html>)
 which understands search terms like:
 
    perl AND python tag:recent "must have this phrase" -apple
@@ -2035,10 +2062,10 @@ against multiple fields:
             tie_breaker                  => 0.7
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/query-string-query.html>
+See L<Query-string Query|http://www.elasticsearch.org/guide/reference/query-dsl/query-string-query.html>
 
 
-=head2 mlt | not_mlt
+=head2 -mlt | -not_mlt
 
 An C<mlt> or C<more_like_this> query finds documents that are "like" the
 specified text, where "like" means that it contains some or all of the
@@ -2061,6 +2088,7 @@ specified terms.
             max_word_len            => 20,
             boost_terms             => 2,
             boost                   => 2.0,
+            analyzer                => 'default'
         }
     }}
 
@@ -2078,13 +2106,14 @@ specified terms.
         max_word_len            => 20,
         boost_terms             => 2,
         boost                   => 2.0,
+        analyzer                => 'default'
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/mlt-field-query.html>
-and L<http://www.elasticsearch.org/guide/reference/query-dsl/mlt-query.html>
+See L<MLT Field Query|http://www.elasticsearch.org/guide/reference/query-dsl/mlt-field-query.html>
+and L<MLT Query|http://www.elasticsearch.org/guide/reference/query-dsl/mlt-query.html>
 
 
-=head2 flt | not_flt
+=head2 -flt | -not_flt
 
 An C<flt> or C<fuzzy_like_this> query fuzzifies all specified terms, then
 picks the best C<max_query_terms> differentiating terms. It is a combination
@@ -2102,6 +2131,7 @@ of C<fuzzy> with C<more_like_this>.
             min_similarity  => 0.5,
             prefix_length   => 3,
             boost           => 2.0,
+            analyzer        => 'default'
         }
     }}
 
@@ -2114,16 +2144,17 @@ of C<fuzzy> with C<more_like_this>.
         min_similarity  => 0.5,
         prefix_length   => 3,
         boost           => 2.0,
+        analyzer        => 'default'
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/flt-field-query.html>
-and L<http://www.elasticsearch.org/guide/reference/query-dsl/flt-query.html>
+See L<FLT Field Query|http://www.elasticsearch.org/guide/reference/query-dsl/flt-field-query.html>
+and L<FLT Query|http://www.elasticsearch.org/guide/reference/query-dsl/flt-query.html>
 
 =head1 PREFIX
 
 =head2 PREFIX (QUERIES)
 
-=head3 ^ | phrase_prefix | not_phrase_prefix
+=head3 ^ | -phrase_prefix | -not_phrase_prefix
 
 These operators use the C<text_phrase_prefix> query.
 
@@ -2160,7 +2191,7 @@ With extra options
 
 See http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html
 
-=head3 prefix | not_prefix
+=head3 -prefix | -not_prefix
 
 The C<prefix> query is a term-based query - no analysis takes place,
 even on analyzed fields.  Generally you should use C<^> instead.
@@ -2176,12 +2207,12 @@ even on analyzed fields.  Generally you should use C<^> instead.
         }
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/prefix-query.html>.
+See L<Prefix Query|http://www.elasticsearch.org/guide/reference/query-dsl/prefix-query.html>.
 
 =head2 PREFIX (FILTERS)
 
 
-=head3 ^ | prefix | not_prefix
+=head3 ^ | -prefix | -not_prefix
 
     # Field foo contains a term which begins with 'bar'
     { foo => { '^'      => 'bar' }}
@@ -2194,14 +2225,14 @@ See L<http://www.elasticsearch.org/guide/reference/query-dsl/prefix-query.html>.
     # Field foo contains a term which begins with neither 'bar' nor 'baz'
     { foo => { 'not_prefix' => ['bar','baz'] }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/prefix-filter.html>
+See L<Prefix Filter|http://www.elasticsearch.org/guide/reference/query-dsl/prefix-filter.html>
 
 
 =head1 WILDCARD AND FUZZY QUERIES
 
 *** Query context only ***
 
-=head2 * | wildcard | not_wildcard
+=head2 * | -wildcard | -not_wildcard
 
 A C<wildcard> is a term-based query (no analysis is applied), which
 does shell globbing to find matching terms. In other words C<?>
@@ -2223,9 +2254,9 @@ characters.
         }
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/wildcard-query.html>
+See L<Wildcard Query|http://www.elasticsearch.org/guide/reference/query-dsl/wildcard-query.html>
 
-=head2 fuzzy | not_fuzzy
+=head2 -fuzzy | -not_fuzzy
 
 A C<fuzzy> query is a term-based query (ie no analysis is done)
 which looks for terms that are similar to the the provided terms,
@@ -2245,9 +2276,9 @@ where similarity is based on the Levenshtein (edit distance) algorithm:
     }}
 
 Normally, you should rather use either the L</"EQUALITY"> queries with
-the C<fuzziness> parameter, or the L</"flt"> queries.
+the C<fuzziness> parameter, or the L<-flt|/"-flt E<verbar> -not_flt"> queries.
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/fuzzy-query.html>.
+See L<Fuzzy Query|http://www.elasticsearch.org/guide/reference/query-dsl/fuzzy-query.html>.
 
 =head1 COMBINING QUERIES
 
@@ -2276,7 +2307,7 @@ C<dis_max> query uses the highest score of any matching queries.
         boost => 2.0
     ] }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/dis-max-query.html>
+See L<DisMax Query|http://www.elasticsearch.org/guide/reference/query-dsl/dis-max-query.html>
 
 =head2 -bool
 
@@ -2300,7 +2331,7 @@ you can do the following:
        }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/bool-query.html>
+See L<Bool Query|http://www.elasticsearch.org/guide/reference/query-dsl/bool-query.html>
 
 =head2 -boosting
 
@@ -2314,7 +2345,7 @@ but the results are "less relevant".
         negative_boost => 0.2
     }}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/boosting-query.html>
+See L<Boosting Query|http://www.elasticsearch.org/guide/reference/query-dsl/boosting-query.html>
 
 =head1 SCRIPTING
 
@@ -2322,7 +2353,7 @@ ElasticSearch supports the use of scripts to customise query or filter
 behaviour.  By default the query language is C<mvel> but javascript, groovy,
 python and native java scripts are also supported.
 
-See L<http://www.elasticsearch.org/guide/reference/modules/scripting.html> for
+See L<Scripting|http://www.elasticsearch.org/guide/reference/modules/scripting.html> for
 more on scripting.
 
 =head2 -custom_score
@@ -2344,7 +2375,7 @@ The C<-custom_score> query allows you to customise the C<_score> or relevance
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/custom-score-query.html>
+See L<Custom Score Query|http://www.elasticsearch.org/guide/reference/query-dsl/custom-score-query.html>
 
 =head2 -script
 
@@ -2365,17 +2396,17 @@ value to indicate that the filter matches.
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/script-filter.html>
+See L<Script Filter|http://www.elasticsearch.org/guide/reference/query-dsl/script-filter.html>
 
 =head1 PARENT/CHILD
 
 Documents stored in ElasticSearch can be configured to have parent/child
 relationships.
 
-See L<http://www.elasticsearch.org/guide/reference/mapping/parent-field.html>
+See L<Parent Field|http://www.elasticsearch.org/guide/reference/mapping/parent-field.html>
 for more.
 
-=head2 has_child | not_has_child
+=head2 -has_child | -not_has_child
 
 Find parent documents that have child documents which match a query.
 
@@ -2385,13 +2416,14 @@ Find parent documents that have child documents which match a query.
             type   => 'comment',
             query  => { tag => 'perl' },
             _scope => 'my_scope',
+            boost  => 1,                    # Query context only
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/has-child-query.html>
-and See L<http://www.elasticsearch.org/guide/reference/query-dsl/has-child-filter.html>.
+See L<Has Child Query|http://www.elasticsearch.org/guide/reference/query-dsl/has-child-query.html>
+and See L<Has Child Filter|http://www.elasticsearch.org/guide/reference/query-dsl/has-child-filter.html>.
 
-=head2 top_children
+=head2 -top_children
 
 *** Query context only ***
 
@@ -2409,7 +2441,7 @@ the scores to find the parent docs whose children best match.
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/top-children-query.html>
+See L<Top Children Query|http://www.elasticsearch.org/guide/reference/query-dsl/top-children-query.html>
 
 =head1 TYPE/ID
 
@@ -2435,8 +2467,8 @@ Returns docs with the matching C<_id> or C<_type>/C<_id> combination:
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/ids-query.html>
-abd L<http://www.elasticsearch.org/guide/reference/query-dsl/ids-filter.html>
+See L<IDs Query|http://www.elasticsearch.org/guide/reference/query-dsl/ids-query.html>
+abd L<IDs Filter|http://www.elasticsearch.org/guide/reference/query-dsl/ids-filter.html>
 
 =head2 -type
 
@@ -2454,7 +2486,7 @@ disabled.
     # Filter docs of type 'comment' or 'blog'
     { -type => ['blog','comment' ]}
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/type-filter.html>
+See L<Type Filter|http://www.elasticsearch.org/guide/reference/query-dsl/type-filter.html>
 
 
 =head1 LIMIT
@@ -2468,7 +2500,7 @@ The C<limit> filter limits the number of documents (per shard) to execute on:
         -filter => { -limit => 100       }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/limit-filter.html>
+See L<Limit Filter|http://www.elasticsearch.org/guide/reference/query-dsl/limit-filter.html>
 
 =head1 CACHING FILTERS
 
@@ -2499,7 +2531,7 @@ C<-cache> or C<-nocache>:
         }
     }
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/> for more
+See L<Query DSL|http://www.elasticsearch.org/guide/reference/query-dsl/> for more
 details about what is cached by default and what is not.
 
 
@@ -2597,7 +2629,7 @@ would work.  However, a C<text> query for C<GREATEST> would work, because
 the search text would be analyzed to produce the same terms that are stored
 in the index.
 
-See L<http://www.elasticsearch.org/guide/reference/index-modules/analysis/>
+See L<Analysis|http://www.elasticsearch.org/guide/reference/index-modules/analysis/>
 for the list of supported analyzers.
 
 =head2 C<text> QUERIES
@@ -2622,7 +2654,7 @@ term:
 Filters, on the other hand, don't have C<text> queries - filters operate on
 simple terms instead.
 
-See L<http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+See L<Text Query|http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
 for more about text queries.
 
 =cut
@@ -2639,6 +2671,10 @@ If you have any suggestions for improvements, or find any bugs, please report
 them to L<https://github.com/clintongormley/ElasticSearch-SearchBuilder/issues>.
 I will be notified, and then you'll automatically be notified of progress on
 your bug as I make changes.
+
+=head1 TODO
+
+Add support for C<span> queries.
 
 =head1 SUPPORT
 

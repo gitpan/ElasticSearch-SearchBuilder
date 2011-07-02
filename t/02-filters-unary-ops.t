@@ -11,6 +11,32 @@ use ElasticSearch::SearchBuilder;
 my $a = ElasticSearch::SearchBuilder->new;
 
 test_filters(
+    "UNARY OPERATOR: all",
+
+    "all: 0",
+    {-all=> 0},
+    {match_all=>{}},
+
+
+    "all: 1",
+    {-all=> 1},
+    {match_all=>{}},
+
+    "all: []",
+    {-all=> []},
+    {match_all=>{}},
+
+    "all: {}",
+    {-all=> {}},
+    {match_all=>{}},
+
+    "all: {kv}",
+    {-all=> {boost=>1}},
+    qr/Unknown param/
+
+);
+
+test_filters(
     "UNARY OPERATORS: missing/exists",
 
     "exists: k",
@@ -75,11 +101,11 @@ test_filters(
 
     'NOT_TYPE: foo',
     { -not_type => 'foo' },
-    { not => { type => { value => 'foo' } } },
+    { not => { filter => { type => { value => 'foo' } } } },
 
     'NOT_TYPE: @foo',
     { -not_type => ['foo'] },
-    { not => { type => { value => ['foo'] } } },
+    { not => { filter => { type => { value => ['foo'] } } } },
 );
 
 test_filters(
@@ -102,19 +128,19 @@ test_filters(
 
     'NOT_IDS: 1',
     { -not_ids => 1 },
-    { not => { ids => { values => [1] } } },
+    { not => { filter => { ids => { values => [1] } } } },
 
     'NOT_IDS: [1]',
     { -not_ids => [1] },
-    { not => { ids => { values => [1] } } },
+    { not => { filter => { ids => { values => [1] } } } },
 
     'NOT_IDS: {V:1,T:foo}',
     { -not_ids => { values => 1, type => 'foo' } },
-    { not => { ids => { type => 'foo', values => [1] } } },
+    { not => { filter => { ids => { type => 'foo', values => [1] } } } },
 
     'NOT_IDS: {V:[1],T:[foo]}',
     { -not_ids => { values => [1], type => ['foo'] } },
-    { not => { ids => { type => ['foo'], values => [1] } } },
+    { not => { filter => { ids => { type => ['foo'], values => [1] } } } },
 
 );
 
@@ -141,10 +167,12 @@ test_filters(
             { query => { foo => 'bar' }, type => 'foo', _scope => 'scope' }
     },
     {   not => {
-            has_child => {
-                query  => { text => { foo => 'bar' } },
-                _scope => 'scope',
-                type   => 'foo'
+            filter => {
+                has_child => {
+                    query  => { text => { foo => 'bar' } },
+                    _scope => 'scope',
+                    type   => 'foo'
+                }
             }
         }
     },
@@ -159,7 +187,7 @@ test_filters(
 
     'NOT_QUERY: {}',
     { -not_query => { k => 'v' } },
-    { not => { query => { text => { k => 'v' } } } },
+    { not => { filter => { query => { text => { k => 'v' } } } } },
 
 );
 
