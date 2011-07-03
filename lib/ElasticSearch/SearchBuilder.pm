@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 my %SPECIAL_OPS = (
     query => {
@@ -785,13 +785,40 @@ sub _filter_unary_cache {
 
     return unless $filter;
 
-    my ($type) = keys %$filter;
+    my ($type) = grep { !/^_/ } keys %$filter;
     if ( $type eq 'query' ) {
         $filter = { fquery => $filter };
         $type = 'fquery';
     }
     $filter->{$type}{_cache} = $op eq 'cache' ? 1 : 0;
     return $filter;
+}
+
+#===================================
+sub _filter_unary_name {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary filter -name",
+        $v,
+        {   HASHREF => sub {
+                my @filters;
+                for my $name ( sort keys %$v ) {
+                    my $filter = $self->_recurse( 'filter', $v->{$name} )
+                        or next;
+                    my ($type) = grep { !/^_/ } keys %$filter;
+                    if ( $type eq 'query' ) {
+                        $filter = { fquery => $filter };
+                        $type = 'fquery';
+                    }
+                    $filter->{$type}{_name} = $name;
+                    push @filters, $filter;
+                }
+                return $self->_join_clauses( 'filter', 'or', \@filters );
+            },
+        }
+    );
+
 }
 
 #======================================================================
@@ -1344,7 +1371,7 @@ ElasticSearch::SearchBuilder - A Perlish compact query language for ElasticSearc
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 Compatible with ElasticSearch version 0.16
 
@@ -1653,7 +1680,8 @@ The C<-and>, C<-or> and C<-not> constructs emit C<bool> queries when
 in query context, and C<and>, C<or> and C<not> clauses when in filter
 context.
 
-See:
+See also:
+L</"NAMED FILTERS">,
 L<Bool Query|http://www.elasticsearch.org/guide/reference/query-dsl/bool-query.html>,
 L<And Filter|http://www.elasticsearch.org/guide/reference/query-dsl/and-filter.html>,
 L<Or Filter|http://www.elasticsearch.org/guide/reference/query-dsl/or-filter.html>
@@ -2501,6 +2529,27 @@ The C<limit> filter limits the number of documents (per shard) to execute on:
     }
 
 See L<Limit Filter|http://www.elasticsearch.org/guide/reference/query-dsl/limit-filter.html>
+
+=head1 NAMED FILTERS
+
+ElasticSearch allows you to name filters, in which each search result will
+include a C<matched_filters> array containing the names of all filters that
+matched.
+
+=head2 -name | -not_name
+
+*** Filter context only ***
+
+    { -name => {
+        popular   => { user_rank => { 'gte' => 10 }},
+        unpopular => { user_rank => { 'lt'  => 10 }},
+    }}
+
+Multiple filters are joined with an C<or> filter (as it doesn't make sense
+to join them with C<and>).
+
+See L<Named Filters|http://www.elasticsearch.org/guide/reference/api/search/named-filters.html>
+and L</"-and E<verbar> -or E<verbar> -not">.
 
 =head1 CACHING FILTERS
 
