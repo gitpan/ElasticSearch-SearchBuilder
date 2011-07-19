@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 my %SPECIAL_OPS = (
     query => {
@@ -689,11 +689,31 @@ sub _query_unary_boosting {
         "Unary query -boosting",
         $v,
         {   HASHREF => sub {
-                my $p = $self->_hash_params( 'dis_max', $v,
+                my $p = $self->_hash_params( 'boosting', $v,
                     [ 'positive', 'negative', 'negative_boost' ] );
                 $p->{$_} = $self->_recurse( 'query', $p->{$_} )
                     for 'positive', 'negative';
                 return { boosting => $p };
+            },
+        }
+    );
+}
+
+#===================================
+sub _query_unary_nested {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary query -nested",
+        $v,
+        {   HASHREF => sub {
+                my $p = $self->_hash_params(
+                    'nested', $v,
+                    [ 'path',       'query' ],
+                    [ 'score_mode', '_scope' ]
+                );
+                $p->{query} = $self->_recurse( 'query', $p->{query} );
+                return { nested => $p };
             },
         }
     );
@@ -758,6 +778,26 @@ sub _filter_unary_script {
                 my $p = $self->_hash_params( 'script', $v, ['script'],
                     [ 'params', 'lang' ] );
                 return { script => $p };
+            },
+        }
+    );
+}
+
+#===================================
+sub _filter_unary_nested {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Filter query -nested",
+        $v,
+        {   HASHREF => sub {
+                my $p = $self->_hash_params(
+                    'nested', $v,
+                    [ 'path',   'filter' ],
+                    [ '_cache', '_name' ],
+                );
+                $p->{filter} = $self->_recurse( 'filter', $p->{filter} );
+                return { nested => $p };
             },
         }
     );
@@ -1398,7 +1438,7 @@ contact me.
 
     my $sb = ElasticSearch::SearchBuilder->new();
     my $query = $sb->query({
-        body    => {text => 'interesting keywords'},
+        body    => 'interesting keywords',
         -filter => {
             status  => 'active',
             tags    => ['perl','python','ruby'],
@@ -1408,6 +1448,14 @@ contact me.
             },
         }
     })
+
+
+B<NOTE>: C<ElasticSearch::SearchBuilder> is fully integrated with the
+L<ElasticSearch> API.  Wherever you can specify C<query>, C<filter> or
+C<facet_filter> in L<ElasticSearch>, you can automatically use SearchBuilder
+by specifying C<queryb>, C<filterb>, C<facet_filterb> instead.
+
+    $es->search( queryb  => { body => 'interesting keywords' } )
 
 =cut
 
@@ -2374,6 +2422,59 @@ but the results are "less relevant".
     }}
 
 See L<Boosting Query|http://www.elasticsearch.org/guide/reference/query-dsl/boosting-query.html>
+
+=head1 NESTED QUERIES/FILTERS
+
+Nested queries/filters allow you to run queries/filters on nested docs.
+
+Normally, a doc like this would not allow you to associate the name C<perl>
+with the number C<5>
+
+   {
+       title:  "my title",
+       tags: [
+        { name: "perl",   num: 5},
+        { name: "python", num: 2}
+       ]
+   }
+
+However, if C<tags> is mapped as a C<nested> field, then you can run queries
+or filters on each sub-doc individually.
+
+See L<Nested Mapping|http://github.com/elasticsearch/elasticsearch/issues/1095>
+
+=head2 -nested (QUERY)
+
+    {
+        -nested => {
+            path        => 'tags',
+            score_mode  => 'avg',
+            _scope      => 'my_tags',
+            query       => {
+                tags.name    => 'perl',
+                tags.num     => { gt => 2},
+            }
+        }
+    }
+
+See L<Nested Query|http://github.com/elasticsearch/elasticsearch/issues/1095>
+
+=head2 -nested (FILTER)
+
+    {
+        -nested => {
+            path        => 'tags',
+            score_mode  => 'avg',
+            _cache      => 1,
+            _name       => 'my_filter',
+            filter      => {
+                tags.name    => 'perl',
+                tags.num     => { gt => 2},
+            }
+        }
+    }
+
+See L<Nested Filter|http://github.com/elasticsearch/elasticsearch/issues/1102>
 
 =head1 SCRIPTING
 
