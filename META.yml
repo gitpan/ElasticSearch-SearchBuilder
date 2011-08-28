@@ -3,26 +3,25 @@ abstract: 'A Perlish compact query language for ElasticSearch'
 author:
   - 'Clinton Gormley <drtech@cpan.org>'
 build_requires:
+  Module::Build: 0.3601
   Test::Differences: 0
   Test::Exception: 0
-  Test::More: 0
+  Test::More: 0.96
 configure_requires:
-  Module::Build: 0.38
-dynamic_config: 1
-generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110930'
+  Module::Build: 0.3601
+dynamic_config: 0
+generated_by: 'Dist::Zilla version 4.300000, CPAN::Meta::Converter version 2.110930'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
 name: ElasticSearch-SearchBuilder
-provides:
-  ElasticSearch::SearchBuilder:
-    file: lib/ElasticSearch/SearchBuilder.pm
-    version: 0.08
 requires:
+  Carp: 0
   Scalar::Util: 0
+  strict: 0
+  warnings: 0
 resources:
   bugtracker: https://github.com/clintongormley/ElasticSearch-SearchBuilder/issues
-  license: http://dev.perl.org/licenses/
-  repository: http://github.com/clintongormley/ElasticSearch-SearchBuilder/
-version: 0.08
+  repository: git://github.com/clintongormley/ElasticSearch-SearchBuilder.git
+version: 0.09

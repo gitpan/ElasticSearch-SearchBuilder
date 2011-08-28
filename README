@@ -648,6 +648,7 @@ FULL TEXT SEARCH
                 boost                        => 2,
                 analyze_wildcard             => 1,
                 auto_generate_phrase_queries => 0,
+                rewrite                      => 'constant_score_default',
             }
         }}
 
@@ -811,8 +812,10 @@ PREFIX
         # With extra options
         { lang => {
             'prefix' => {
-                value => 'p',
-                boost => 2
+                value   => 'p',
+                boost   => 2,
+                rewrite => 'constant_score_default',
+
             }
         }}
 
@@ -855,8 +858,9 @@ WILDCARD AND FUZZY QUERIES
         }}
         { foo => {
             'wildcard' => {
-                value => 'f?ob*',
-                boost => 2.0
+                value   => 'f?ob*',
+                boost   => 2.0,
+                rewrite => 'constant_score_default',
             }
         }}
 
@@ -1144,6 +1148,114 @@ PARENT/CHILD
     See Top Children Query
     <http://www.elasticsearch.org/guide/reference/query-dsl/top-children-que
     ry.html>
+
+GEO FILTERS
+    For all the geo filters, the "normalize" parameter defaults to "true",
+    meaning that the longitude value will be normalized to -180 to 180 and
+    the latitude value to -90 to 90.
+
+  -geo_distance | -not_geo_distance
+    *** Filter context only ***
+
+    The "geo_distance" filter will find locations within a certain distance
+    of a given point:
+
+        {
+            my_location => {
+                -geo_distance     => {
+                    location      => { lat => 10, lon => 5 },
+                    distance      => '5km',
+                    normalize     => 1 | 0,
+                    optimize_bbox => 1 | 0,
+                }
+            }
+        }
+
+    See Geo Distance Filter
+    <http://www.elasticsearch.org/guide/reference/query-dsl/geo-distance-fil
+    ter.html>
+
+  -geo_distance_range | -not_geo_distance_range
+    *** Filter context only ***
+
+    The "geo_distance_range" filter is similar to the -geo_distance filter,
+    but expressed as a range:
+
+        {
+            my_location => {
+                -geo_distance       => {
+                    location        => { lat => 10, lon => 5 },
+                    from            => '5km',
+                    to              => '10km',
+                    include_lower   => 1 | 0,
+                    include_upper   => 0 | 1
+                    normalize       => 1 | 0,
+                    optimize_bbox   => 1 | 0,
+                }
+            }
+        }
+
+    or instead of "from", "to", "include_lower" and "include_upper" you can
+    use "gt", "gte", "lt", "lte".
+
+    See Geo Distance Range Filter
+    <http://www.elasticsearch.org/guide/reference/query-dsl/geo-distance-ran
+    ge-filter.html>
+
+  -geo_bounding_box | -geo_bbox | -not_geo_bounding_box | -not_geo_bbox
+    *** Filter context only ***
+
+    The "geo_bounding_box" filter finds points which lie within the given
+    rectangle:
+
+        {
+            my_location => {
+                -geo_bbox => {
+                    top_left     => { lat => 9, lon => 4  },
+                    bottom_right => { lat => 10, lon => 5 },
+                    normalize    => 1 | 0
+                }
+            }
+        }
+
+    See Geo Bounding Box Filter
+    <http://www.elasticsearch.org/guide/reference/query-dsl/geo-bounding-box
+    -filter.html>
+
+  -geo_polygon | -not_geo_polygon
+    *** Filter context only ***
+
+    The "geo_polygon" filter is similar to the -geo_bounding_box filter,
+    except that it allows you to specify a polygon instead of a rectangle:
+
+        {
+            my_location => {
+                -geo_polygon => [
+                    { lat => 40, lon => -70 },
+                    { lat => 30, lon => -80 },
+                    { lat => 20, lon => -90 },
+                ]
+            }
+        }
+
+    or:
+
+        {
+            my_location => {
+                -geo_polygon => {
+                    points  => [
+                        { lat => 40, lon => -70 },
+                        { lat => 30, lon => -80 },
+                        { lat => 20, lon => -90 },
+                    ],
+                    normalize => 1 | 0,
+                }
+            }
+        }
+
+    See Geo Polygon Filter
+    <http://www.elasticsearch.org/guide/reference/query-dsl/geo-polygon-filt
+    er.html>
 
 TYPE/ID
     The "_id" field is not indexed by default, and thus isn't available for

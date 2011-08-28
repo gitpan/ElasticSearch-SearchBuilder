@@ -3,8 +3,8 @@
    "author" : [
       "Clinton Gormley <drtech@cpan.org>"
    ],
-   "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110930",
+   "dynamic_config" : 0,
+   "generated_by" : "Dist::Zilla version 4.300000, CPAN::Meta::Converter version 2.110930",
    "license" : [
       "perl_5"
    ],
@@ -16,26 +16,29 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "Test::Differences" : 0,
-            "Test::Exception" : 0,
-            "Test::More" : 0
+            "Module::Build" : "0.3601",
+            "Test::More" : "0.96"
          }
       },
       "configure" : {
          "requires" : {
-            "Module::Build" : "0.38"
+            "Module::Build" : "0.3601"
          }
       },
       "runtime" : {
          "requires" : {
-            "Scalar::Util" : 0
+            "Carp" : 0,
+            "Scalar::Util" : 0,
+            "strict" : 0,
+            "warnings" : 0
          }
-      }
-   },
-   "provides" : {
-      "ElasticSearch::SearchBuilder" : {
-         "file" : "lib/ElasticSearch/SearchBuilder.pm",
-         "version" : "0.08"
+      },
+      "test" : {
+         "requires" : {
+            "Test::Differences" : 0,
+            "Test::Exception" : 0,
+            "Test::More" : 0
+         }
       }
    },
    "release_status" : "stable",
@@ -43,12 +46,12 @@
       "bugtracker" : {
          "web" : "https://github.com/clintongormley/ElasticSearch-SearchBuilder/issues"
       },
-      "license" : [
-         "http://dev.perl.org/licenses/"
-      ],
       "repository" : {
-         "url" : "http://github.com/clintongormley/ElasticSearch-SearchBuilder/"
+         "type" : "git",
+         "url" : "git://github.com/clintongormley/ElasticSearch-SearchBuilder.git",
+         "web" : "https://github.com/clintongormley/ElasticSearch-SearchBuilder"
       }
    },
-   "version" : "0.08"
+   "version" : "0.09"
 }
+

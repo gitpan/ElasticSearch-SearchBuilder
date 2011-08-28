@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 my %SPECIAL_OPS = (
     query => {
@@ -863,6 +863,10 @@ sub _filter_unary_cache {
         $filter = { fquery => $filter };
         $type = 'fquery';
     }
+    elsif ( $type eq 'or' or $type eq 'and' ) {
+        my $filters = $filter->{$type};
+        $filter->{$type} = { filters => $filters } if ref $filters eq 'ARRAY';
+    }
     $filter->{$type}{_cache} = $op eq 'cache' ? 1 : 0;
     return $filter;
 }
@@ -903,13 +907,15 @@ sub _filter_unary_name {
 #===================================
 sub _query_field_prefix {
 #===================================
-    shift->_query_field_generic( @_, 'prefix', ['value'], ['boost'] );
+    shift->_query_field_generic( @_, 'prefix', ['value'],
+        [ 'boost', 'rewrite' ] );
 }
 
 #===================================
 sub _query_field_wildcard {
 #===================================
-    shift->_query_field_generic( @_, 'wildcard', ['value'], ['boost'] );
+    shift->_query_field_generic( @_, 'wildcard', ['value'],
+        [ 'boost', 'rewrite' ] );
 }
 
 #===================================
@@ -959,7 +965,7 @@ sub _query_field_query_string {
         [   qw(default_operator analyzer allow_leading_wildcard
                 lowercase_expanded_terms enable_position_increments
                 fuzzy_prefix_length fuzzy_min_sim phrase_slop boost
-                analyze_wildcard auto_generate_phrase_queries)
+                analyze_wildcard auto_generate_phrase_queries rewrite)
         ]
     );
 }
@@ -1253,11 +1259,18 @@ sub _filter_field_exists {
 }
 
 #===================================
+sub _filter_field_geo_bbox {
+#===================================
+    shift->_filter_field_geo_bounding_box( $_[0], 'geo_bbox', $_[2] );
+}
+
+#===================================
 sub _filter_field_geo_bounding_box {
 #===================================
     my $self = shift;
     my $k    = shift;
-    my $p    = $self->_hash_params( @_, [qw(top_left bottom_right)] );
+    my $p    = $self->_hash_params( @_, [qw(top_left bottom_right)],
+        ['normalize'] );
     return { geo_bounding_box => { $k => $p } };
 }
 
@@ -1266,13 +1279,10 @@ sub _filter_field_geo_distance {
 #===================================
     my $self = shift;
     my $k    = shift;
-    my $p    = $self->_hash_params( @_, [qw(distance location)] );
-    return {
-        geo_distance => {
-            distance => $p->{distance},
-            $k       => $p->{location}
-        }
-    };
+    my $p    = $self->_hash_params( @_, [qw(distance location )],
+        [ 'normalize', 'optimize_bbox' ] );
+    $p->{$k} = delete $p->{location};
+    return { geo_distance => $p };
 }
 
 #===================================
@@ -1280,8 +1290,13 @@ sub _filter_field_geo_distance_range {
 #===================================
     my $self = shift;
     my $k    = shift;
-    my $p    = $self->_hash_params( @_, ['location'],
-        [qw(from to gt lt gte lte include_upper include_lower)] );
+    my $p    = $self->_hash_params(
+        @_,
+        ['location'],
+        [   qw(from to gt lt gte lte
+                include_upper include_lower normalize optimize_bbox)
+        ]
+    );
     $p->{$k} = delete $p->{location};
     return { geo_distance_range => $p };
 }
@@ -1289,13 +1304,20 @@ sub _filter_field_geo_distance_range {
 #===================================
 sub _filter_field_geo_polygon {
 #===================================
-    my ( $self, $k, $op, $val ) = @_;
+    my $self = shift;
+    my $k    = shift;
+    my ( $op, $val ) = @_;
 
     return $self->_SWITCH_refkind(
         "Filter field operator -$op",
         $val,
         {   ARRAYREF => sub {
                 return { geo_polygon => { $k => { points => $val } } };
+            },
+            HASHREF => sub {
+                my $p = $self->_hash_params( $op, $val, ['points'],
+                    ['normalize'] );
+                return { geo_polygon => { $k => $p } };
             },
         }
     );
@@ -2147,6 +2169,7 @@ L<ElasticSearch::QueryParser> to fix any syntax errors.
             boost                        => 2,
             analyze_wildcard             => 1,
             auto_generate_phrase_queries => 0,
+            rewrite                      => 'constant_score_default',
         }
     }}
 
@@ -2311,8 +2334,10 @@ even on analyzed fields.  Generally you should use C<^> instead.
     # With extra options
     { lang => {
         'prefix' => {
-            value => 'p',
-            boost => 2
+            value   => 'p',
+            boost   => 2,
+            rewrite => 'constant_score_default',
+
         }
     }}
 
@@ -2358,8 +2383,9 @@ characters.
     }}
     { foo => {
         'wildcard' => {
-            value => 'f?ob*',
-            boost => 2.0
+            value   => 'f?ob*',
+            boost   => 2.0,
+            rewrite => 'constant_score_default',
         }
     }}
 
@@ -2636,6 +2662,111 @@ the scores to find the parent docs whose children best match.
     }
 
 See L<Top Children Query|http://www.elasticsearch.org/guide/reference/query-dsl/top-children-query.html>
+
+=head1 GEO FILTERS
+
+For all the geo filters, the C<normalize> parameter defaults to C<true>, meaning
+that the longitude value will be normalized to C<-180> to C<180> and the
+latitude value to C<-90> to C<90>.
+
+=head2 -geo_distance | -not_geo_distance
+
+*** Filter context only ***
+
+The C<geo_distance> filter will find locations within a certain distance of
+a given point:
+
+    {
+        my_location => {
+            -geo_distance     => {
+                location      => { lat => 10, lon => 5 },
+                distance      => '5km',
+                normalize     => 1 | 0,
+                optimize_bbox => 1 | 0,
+            }
+        }
+    }
+
+See L<Geo Distance Filter|http://www.elasticsearch.org/guide/reference/query-dsl/geo-distance-filter.html>
+
+=head2 -geo_distance_range | -not_geo_distance_range
+
+*** Filter context only ***
+
+The C<geo_distance_range> filter is similar to the L<-geo_distance|/"-geo_distance | -not_geo_distance">
+filter, but expressed as a range:
+
+    {
+        my_location => {
+            -geo_distance       => {
+                location        => { lat => 10, lon => 5 },
+                from            => '5km',
+                to              => '10km',
+                include_lower   => 1 | 0,
+                include_upper   => 0 | 1
+                normalize       => 1 | 0,
+                optimize_bbox   => 1 | 0,
+            }
+        }
+    }
+
+or instead of C<from>, C<to>, C<include_lower> and C<include_upper> you can
+use C<gt>, C<gte>, C<lt>, C<lte>.
+
+See L<Geo Distance Range Filter|http://www.elasticsearch.org/guide/reference/query-dsl/geo-distance-range-filter.html>
+
+=head2 -geo_bounding_box | -geo_bbox | -not_geo_bounding_box | -not_geo_bbox
+
+*** Filter context only ***
+
+The C<geo_bounding_box> filter finds points which lie within the given
+rectangle:
+
+    {
+        my_location => {
+            -geo_bbox => {
+                top_left     => { lat => 9, lon => 4  },
+                bottom_right => { lat => 10, lon => 5 },
+                normalize    => 1 | 0
+            }
+        }
+    }
+
+See L<Geo Bounding Box Filter|http://www.elasticsearch.org/guide/reference/query-dsl/geo-bounding-box-filter.html>
+
+=head2 -geo_polygon | -not_geo_polygon
+
+*** Filter context only ***
+
+The C<geo_polygon> filter is similar to the L<-geo_bounding_box|/"-geo_bounding_box | -geo_bbox | -not_geo_bounding_box | -not_geo_bbox">
+filter, except that it allows you to specify a polygon instead of a rectangle:
+
+    {
+        my_location => {
+            -geo_polygon => [
+                { lat => 40, lon => -70 },
+                { lat => 30, lon => -80 },
+                { lat => 20, lon => -90 },
+            ]
+        }
+    }
+
+or:
+
+    {
+        my_location => {
+            -geo_polygon => {
+                points  => [
+                    { lat => 40, lon => -70 },
+                    { lat => 30, lon => -80 },
+                    { lat => 20, lon => -90 },
+                ],
+                normalize => 1 | 0,
+            }
+        }
+    }
+
+See L<Geo Polygon Filter|http://www.elasticsearch.org/guide/reference/query-dsl/geo-polygon-filter.html>
 
 =head1 TYPE/ID
 
