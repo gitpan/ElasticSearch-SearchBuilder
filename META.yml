@@ -24,4 +24,4 @@ requires:
 resources:
   bugtracker: https://github.com/clintongormley/ElasticSearch-SearchBuilder/issues
   repository: git://github.com/clintongormley/ElasticSearch-SearchBuilder.git
-version: 0.09
+version: 0.10

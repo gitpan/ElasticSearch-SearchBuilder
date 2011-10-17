@@ -14,6 +14,7 @@ t/03-filters-logic.t
 t/04-queries-field-ops.t
 t/05-queries-unary-ops.t
 t/06-queries-logic.t
+t/07-misc.t
 t/manifest.t
 t/pod-coverage.t
 t/pod.t
