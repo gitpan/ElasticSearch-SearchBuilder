@@ -5,7 +5,7 @@ NAME
 VERSION
     Version 0.08
 
-    Compatible with ElasticSearch version 0.17.5
+    Compatible with ElasticSearch version 0.19.0RC2
 
 DESCRIPTION
     The Query DSL for ElasticSearch (see Query DSL
@@ -17,9 +17,8 @@ DESCRIPTION
     which exposes the full power of the query DSL, but in a more compact,
     Perlish way.
 
-    This module is currently Beta - the API might yet change. If you have
-    suggestions for improvements to the API or the documenation, please
-    contact me.
+    This module is considered stable. If you have suggestions for
+    improvements to the API or the documenation, please contact me.
 
 SYNOPSIS
         my $sb = ElasticSearch::SearchBuilder->new();
@@ -243,7 +242,7 @@ INTRODUCTION
         }
 
     However, the first element in an array ref which is used as the value
-    for a field operator (see </"FIELD OPERATORS">) is not special:
+    for a field operator (see "FIELD OPERATORS") is not special:
 
         # WRONG
         { tags => { '=' => [ '-and','perl','python' ] }}
@@ -340,8 +339,8 @@ INTRODUCTION
         { foo => { not_prefix => ['bar','baz'] }}
 
   UNARY OPERATORS
-    There are other operators which don't fit this "{ field => { op =>
-    value}}"model.
+    There are other operators which don't fit this "{ field => { op => value
+    }}" model.
 
     For instance:
 
@@ -649,6 +648,7 @@ FULL TEXT SEARCH
                 analyze_wildcard             => 1,
                 auto_generate_phrase_queries => 0,
                 rewrite                      => 'constant_score_default',
+                minimum_number_should_match  => 3,
             }
         }}
 
@@ -670,7 +670,8 @@ FULL TEXT SEARCH
                 analyze_wildcard             => 1,
                 auto_generate_phrase_queries => 0,
                 use_dis_max                  => 1,
-                tie_breaker                  => 0.7
+                tie_breaker                  => 0.7,
+                minimum_number_should_match  => 3,
         }}
 
     See Query-string Query
@@ -961,6 +962,22 @@ COMBINING QUERIES
     <http://www.elasticsearch.org/guide/reference/query-dsl/boosting-query.h
     tml>
 
+  -custom_boost
+    The "custom_boost" query allows you to multiply the scores of another
+    query by the specified boost factor. This is a bit different from a
+    standard "boost", which is normalized.
+
+        {
+            -custom_boost => {
+                query           => { title => 'foo' },
+                boost_factor    => 3
+            }
+        }
+
+    See Custom Boost Factor Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/custom-boost-fac
+    tor-query.html>.
+
 NESTED QUERIES/FILTERS
     Nested queries/filters allow you to run queries/filters on nested docs.
 
@@ -979,7 +996,11 @@ NESTED QUERIES/FILTERS
     queries or filters on each sub-doc individually.
 
     See Nested Mapping
-    <http://github.com/elasticsearch/elasticsearch/issues/1095>
+    <http://github.com/elasticsearch/elasticsearch/issues/1095>, Nested Type
+    <http://www.elasticsearch.org/guide/reference/mapping/nested-type.html>
+    and Nested Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.htm
+    l>
 
   -nested (QUERY)
         {
@@ -988,8 +1009,8 @@ NESTED QUERIES/FILTERS
                 score_mode  => 'avg',
                 _scope      => 'my_tags',
                 query       => {
-                    tags.name    => 'perl',
-                    tags.num     => { gt => 2},
+                    "tags.name"  => 'perl',
+                    "tags.num"   => { gt => 2 },
                 }
             }
         }
@@ -1059,7 +1080,7 @@ SCRIPTING
         {
             -custom_filters_score => {
                 query       => { foo => 'bar' },
-                score_mode  => 'first|max|total|avg',       # default 'first',
+                score_mode  => 'first|max|total|avg|min|multiply', # default 'first'
                 filters     => [
                     {
                         filter => { tag => 'perl' },
@@ -1166,7 +1187,7 @@ GEO FILTERS
                     location      => { lat => 10, lon => 5 },
                     distance      => '5km',
                     normalize     => 1 | 0,
-                    optimize_bbox => 1 | 0,
+                    optimize_bbox => memory | indexed | none,
                 }
             }
         }
@@ -1190,7 +1211,7 @@ GEO FILTERS
                     include_lower   => 1 | 0,
                     include_upper   => 0 | 1
                     normalize       => 1 | 0,
-                    optimize_bbox   => 1 | 0,
+                    optimize_bbox   => memory | indexed | none,
                 }
             }
         }
@@ -1213,7 +1234,8 @@ GEO FILTERS
                 -geo_bbox => {
                     top_left     => { lat => 9, lon => 4  },
                     bottom_right => { lat => 10, lon => 5 },
-                    normalize    => 1 | 0
+                    normalize    => 1 | 0,
+                    type         => memory | indexed
                 }
             }
         }
@@ -1257,11 +1279,35 @@ GEO FILTERS
     <http://www.elasticsearch.org/guide/reference/query-dsl/geo-polygon-filt
     er.html>
 
-TYPE/ID
-    The "_id" field is not indexed by default, and thus isn't available for
-    normal queries or filters.
+INDEX/TYPE/ID
+  -indices
+    *** Query context only ***
+
+    To run a different query depending on the index name, you can use the
+    "-indices" query:
+
+        {
+            -indices => {
+                indices         => 'one' | ['one','two],
+                query           => { status => 'active' },
+                no_match_query  => 'all' | 'none' | { another => query }
+            }
+        }
+
+    The `no_match_query` will be run on any indices which don't appear in
+    the specified list. It defaults to "all", but can be set to "none" or to
+    a full query.
+
+    See Indices Query
+    <https://github.com/elasticsearch/elasticsearch/issues/1416> and
+    no_match_query
+    <https://github.com/elasticsearch/elasticsearch/issues/1492> for
+    details.
 
   -ids
+    The "_id" field is not indexed by default, and thus isn't available for
+    normal queries or filters
+
     Returns docs with the matching "_id" or "_type"/"_id" combination:
 
         # doc with ID 123
@@ -1368,6 +1414,99 @@ CACHING FILTERS
     See Query DSL <http://www.elasticsearch.org/guide/reference/query-dsl/>
     for more details about what is cached by default and what is not.
 
+  -cache_key
+    It is also possible to use a name to identify a cached filter. For
+    instance:
+
+        {
+            -cache_key => {
+                friends => { person_id => [1,2,3] },
+                enemies => { person_id => [4,5,6] },
+            }
+        }
+
+    In the above example, the two filters will be joined by an "and" filter.
+    The following example will have the two filters joined by an "or"
+    filter:
+
+        {
+            -cache_key => [
+                friends => { person_id => [1,2,3] },
+                enemies => { person_id => [4,5,6] },
+            ]
+        }
+
+    See _cache_key
+    <http://www.elasticsearch.org/guide/reference/query-dsl/index.html> for
+    more details.
+
+RAW ELASTICSEARCH QUERY DSL
+    Sometimes, instead of using the SearchBuilder syntax, you may want to
+    revert to the raw Query DSL that ElasticSearch uses.
+
+    You can do this by passing a reference to a HASH ref, for instance:
+
+        $sb->query({
+            foo => 1,
+            -filter => \{ term => { bar => 2 }}
+        })
+
+    Would result in:
+
+        {
+            query => {
+                filtered => {
+                    query => {
+                        text => { foo => 1 }
+                    },
+                    filter => {
+                        term => { bar => 2 }
+                    }
+                }
+            }
+        }
+
+    An example with OR'ed filters:
+
+        $sb->filter([
+            foo => 1,
+            \{ term => { bar => 2 }}
+        ])
+
+    Would result in:
+
+        {
+            filter => {
+                or => [
+                    { term => { foo => 1 }},
+                    { term => { bar => 2 }}
+                ]
+            }
+        }
+
+    An example with AND'ed filters:
+
+        $sb->filter({
+            -and => [
+                foo => 1 ,
+                \{ term => { bar => 2 }}
+            ]
+        })
+
+    Would result in:
+
+        {
+            filter => {
+                and => [
+                    { term => { foo => 1 }},
+                    { term => { bar => 2 }}
+                ]
+            }
+        }
+
+    Wherever a filter or query is expected, passing a reference to a
+    HASH-ref is accepted.
+
 ELASTICSEARCH CONCEPTS
   FILTERS VS QUERIES
     ElasticSearch supports filters and queries:
@@ -1458,8 +1597,6 @@ AUTHOR
     Clinton Gormley, "<drtech at cpan.org>"
 
 BUGS
-    This is a beta module, so the API may well change in the future.
-
     If you have any suggestions for improvements, or find any bugs, please
     report them to
     <https://github.com/clintongormley/ElasticSearch-SearchBuilder/issues>.

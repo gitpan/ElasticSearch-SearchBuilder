@@ -91,8 +91,11 @@ test_filters(
     { type => { value => 'foo' } },
 
     'TYPE: @foo',
-    { -type => ['foo'] },
-    { type => { value => ['foo'] } },
+    { -type => [ 'foo', 'bar' ] },
+    {   or => [
+            { type => { value => 'foo' } }, { type => { value => 'bar' } }
+        ]
+    },
 
     'TYPE: UNDEF',
     { -type => undef },
@@ -103,8 +106,16 @@ test_filters(
     { not => { filter => { type => { value => 'foo' } } } },
 
     'NOT_TYPE: @foo',
-    { -not_type => ['foo'] },
-    { not => { filter => { type => { value => ['foo'] } } } },
+    { -not_type => [ 'foo', 'bar' ] },
+    {   not => {
+            filter => {
+                or => [
+                    { type => { value => 'foo' } },
+                    { type => { value => 'bar' } }
+                ]
+            }
+        }
+    },
 );
 
 test_filters(
@@ -248,6 +259,38 @@ test_filters(
     'NOT_NOCACHE',
     { -not_nocache => {} },
     qr/Invalid op 'not_nocache'/,
+
+);
+
+test_filters(
+    'UNARY OPERATOR: -cache_key',
+    '-cache_key: V',
+    { -cache_key => 'V' },
+    qr/HASHREF|ARRAYREF/,
+
+    '-cache_key: {}',
+    {   -cache_key => {
+            foo => { a => 1 },
+            bar => { b => 1 }
+        }
+    },
+    {   and => [
+            { term => { _cache_key => 'bar', b => 1 } },
+            { term => { _cache_key => 'foo', a => 1 } }
+        ]
+    },
+
+    '-cache_key: []',
+    {   -cache_key => [
+            foo => { a => 1 },
+            bar => { b => 1 }
+        ]
+    },
+    {   or => [
+            { term => { _cache_key => 'foo', a => 1 } },
+            { term => { _cache_key => 'bar', b => 1 } }
+        ]
+    },
 
 );
 

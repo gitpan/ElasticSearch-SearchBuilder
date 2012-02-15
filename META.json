@@ -16,13 +16,12 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "Module::Build" : "0.3601",
             "Test::More" : "0.96"
          }
       },
       "configure" : {
          "requires" : {
-            "Module::Build" : "0.3601"
+            "ExtUtils::MakeMaker" : "6.30"
          }
       },
       "runtime" : {
@@ -52,6 +51,6 @@
          "web" : "https://github.com/clintongormley/ElasticSearch-SearchBuilder"
       }
    },
-   "version" : "0.10"
+   "version" : "0.11"
 }
 

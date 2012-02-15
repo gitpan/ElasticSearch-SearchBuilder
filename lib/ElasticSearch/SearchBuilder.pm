@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 my %SPECIAL_OPS = (
     query => {
@@ -88,7 +88,8 @@ sub _top_ARRAYREF {
                 HASHREF => sub {
                     $self->_recurse( $type, $el, 'and' ) if %$el;
                 },
-                SCALAR => sub {
+                HASHREFREF => sub {$$el},
+                SCALAR     => sub {
                     $self->_recurse( $type, { $el => shift(@args) } );
                 },
                 UNDEF => sub { croak "UNDEF in arrayref not supported" },
@@ -148,13 +149,6 @@ sub _top_HASHREF {
 }
 
 #===================================
-sub _top_SCALARREF {
-#===================================
-    my ( $self, $type, $params ) = @_;
-    return ($$params);
-}
-
-#===================================
 sub _top_SCALAR {
 #===================================
     my ( $self, $type, $params ) = @_;
@@ -164,10 +158,10 @@ sub _top_SCALAR {
 }
 
 #===================================
-sub _top_UNDEF {
+sub _top_HASHREFREF { return ${ $_[2] } }
+sub _top_SCALARREF  { return ${ $_[2] } }
+sub _top_UNDEF      {return}
 #===================================
-    return ();
-}
 
 #======================================================================
 # HASH PAIRS
@@ -560,7 +554,8 @@ sub _query_unary_query_string {
                             default_operator enable_position_increments
                             fields fuzzy_min_sim fuzzy_prefix_length
                             lowercase_expanded_terms phrase_slop
-                            tie_breaker use_dis_max)
+                            tie_breaker use_dis_max
+                            minimum_number_should_match )
                     ]
                 );
                 return { query_string => $p };
@@ -733,6 +728,51 @@ sub _query_unary_boosting {
 }
 
 #===================================
+sub _query_unary_custom_boost {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary query -custom_boost",
+        $v,
+        {   HASHREF => sub {
+                my $p = $self->_hash_params( 'custom_boost', $v,
+                    [ 'query', 'boost_factor' ] );
+                $p->{query} = $self->_recurse( 'query', $p->{query} );
+                return { custom_boost_factor => $p };
+            },
+        }
+    );
+}
+
+#===================================
+sub _query_unary_indices {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary query -indices",
+        $v,
+        {   HASHREF => sub {
+                my $p
+                    = $self->_hash_params( 'indices', $v,
+                    [ 'indices', 'query' ],
+                    ['no_match_query'] );
+                $p->{indices} = [ $p->{indices} ]
+                    unless ref $p->{indices} eq 'ARRAY';
+                $p->{query} = $self->_recurse( 'query', $p->{query} );
+                my $no = delete $p->{no_match_query};
+                if ($no) {
+                    $p->{no_match_query}
+                        = $no =~ /^(?:all|none)$/
+                        ? $no
+                        : $self->_recurse( 'query', $no );
+                }
+                return { indices => $p };
+            },
+        }
+    );
+}
+
+#===================================
 sub _query_unary_nested {
 #===================================
     my ( $self, $v ) = @_;
@@ -782,7 +822,10 @@ sub _filter_unary_type {
         "Unary filter -type",
         $v,
         {   SCALAR   => sub { return { type => { value => $v } } },
-            ARRAYREF => sub { return { type => { value => $v } } },
+            ARRAYREF => sub {
+                my @clauses = map { +{ type => { value => $_ } } } @$v;
+                return $self->_join_clauses( 'filter', 'or', \@clauses );
+            },
         }
     );
 }
@@ -826,8 +869,8 @@ sub _filter_unary_nested {
         {   HASHREF => sub {
                 my $p = $self->_hash_params(
                     'nested', $v,
-                    [ 'path',   'filter' ],
-                    [ '_cache', '_name' ],
+                    [ 'path', 'filter' ],
+                    [ '_cache', '_name', '_cache_key' ],
                 );
                 $p->{filter} = $self->_recurse( 'filter', $p->{filter} );
                 return { nested => $p };
@@ -898,6 +941,39 @@ sub _filter_unary_name {
 
 }
 
+#===================================
+sub _filter_unary_cache_key {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary filter -cache_key",
+        $v,
+        {   HASHREF  => sub { $self->_join_cache_keys( 'and', %$v ) },
+            ARRAYREF => sub { $self->_join_cache_keys( 'or',  @$v ) }
+        }
+    );
+
+}
+
+#===================================
+sub _join_cache_keys {
+#===================================
+    my ( $self, $op, @v ) = @_;
+    my @filters;
+    while (@v) {
+        my $key = shift @v;
+        my $filter = $self->_recurse( 'filter', shift @v ) or next;
+        my ($type) = grep { !/^_/ } keys %$filter;
+        if ( $type eq 'query' ) {
+            $filter = { fquery => $filter };
+            $type = 'fquery';
+        }
+        $filter->{$type}{_cache_key} = $key;
+        push @filters, $filter;
+    }
+    return $self->_join_clauses( 'filter', $op, \@filters );
+}
+
 #======================================================================
 # FIELD OPS
 #======================================================================
@@ -965,7 +1041,8 @@ sub _query_field_query_string {
         [   qw(default_operator analyzer allow_leading_wildcard
                 lowercase_expanded_terms enable_position_increments
                 fuzzy_prefix_length fuzzy_min_sim phrase_slop boost
-                analyze_wildcard auto_generate_phrase_queries rewrite)
+                analyze_wildcard auto_generate_phrase_queries rewrite
+                minimum_number_should_match)
         ]
     );
 }
@@ -1269,8 +1346,11 @@ sub _filter_field_geo_bounding_box {
 #===================================
     my $self = shift;
     my $k    = shift;
-    my $p    = $self->_hash_params( @_, [qw(top_left bottom_right)],
-        ['normalize'] );
+    my $p    = $self->_hash_params(
+        @_,
+        [qw(top_left bottom_right)],
+        [ 'normalize', 'type' ]
+    );
     return { geo_bounding_box => { $k => $p } };
 }
 
@@ -1469,7 +1549,7 @@ ElasticSearch::SearchBuilder - A Perlish compact query language for ElasticSearc
 
 Version 0.08
 
-Compatible with ElasticSearch version 0.17.5
+Compatible with ElasticSearch version 0.19.0RC2
 
 =cut
 
@@ -1484,7 +1564,7 @@ L<ElasticSearch::SearchBuilder> is an L<SQL::Abstract>-like query language
 which exposes the full power of the query DSL, but in a more compact,
 Perlish way.
 
-B<This module is currently Beta - the API might yet change.> If you have
+B<This module is considered stable.> If you have
 suggestions for improvements to the API or the documenation, please
 contact me.
 
@@ -1741,7 +1821,7 @@ element of the array ref C<-and>:
     }
 
 However, the first element in an array ref which is used as the value for
-a field operator (see </"FIELD OPERATORS">) is not special:
+a field operator (see L</"FIELD OPERATORS">) is not special:
 
     # WRONG
     { tags => { '=' => [ '-and','perl','python' ] }}
@@ -1843,7 +1923,7 @@ All word operators may be negated by adding C<not_> to the beginning, eg:
 =head2 UNARY OPERATORS
 
 There are other operators which don't fit this
-C<< { field => { op => value}} >>model.
+C<< { field => { op => value }} >> model.
 
 For instance:
 
@@ -2171,6 +2251,7 @@ L<ElasticSearch::QueryParser> to fix any syntax errors.
             analyze_wildcard             => 1,
             auto_generate_phrase_queries => 0,
             rewrite                      => 'constant_score_default',
+            minimum_number_should_match  => 3,
         }
     }}
 
@@ -2192,7 +2273,8 @@ against multiple fields:
             analyze_wildcard             => 1,
             auto_generate_phrase_queries => 0,
             use_dis_max                  => 1,
-            tie_breaker                  => 0.7
+            tie_breaker                  => 0.7,
+            minimum_number_should_match  => 3,
     }}
 
 See L<Query-string Query|http://www.elasticsearch.org/guide/reference/query-dsl/query-string-query.html>
@@ -2483,6 +2565,21 @@ but the results are "less relevant".
 
 See L<Boosting Query|http://www.elasticsearch.org/guide/reference/query-dsl/boosting-query.html>
 
+=head2 -custom_boost
+
+The C<custom_boost> query allows you to multiply the scores of another query
+by the specified boost factor. This is a bit different from a standard C<boost>,
+which is normalized.
+
+    {
+        -custom_boost => {
+            query           => { title => 'foo' },
+            boost_factor    => 3
+        }
+    }
+
+See L<Custom Boost Factor Query|http://www.elasticsearch.org/guide/reference/query-dsl/custom-boost-factor-query.html>.
+
 =head1 NESTED QUERIES/FILTERS
 
 Nested queries/filters allow you to run queries/filters on nested docs.
@@ -2501,7 +2598,9 @@ with the number C<5>
 However, if C<tags> is mapped as a C<nested> field, then you can run queries
 or filters on each sub-doc individually.
 
-See L<Nested Mapping|http://github.com/elasticsearch/elasticsearch/issues/1095>
+See L<Nested Mapping|http://github.com/elasticsearch/elasticsearch/issues/1095>,
+L<Nested Type|http://www.elasticsearch.org/guide/reference/mapping/nested-type.html>
+and L<Nested Query|http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.html>
 
 =head2 -nested (QUERY)
 
@@ -2511,8 +2610,8 @@ See L<Nested Mapping|http://github.com/elasticsearch/elasticsearch/issues/1095>
             score_mode  => 'avg',
             _scope      => 'my_tags',
             query       => {
-                tags.name    => 'perl',
-                tags.num     => { gt => 2},
+                "tags.name"  => 'perl',
+                "tags.num"   => { gt => 2 },
             }
         }
     }
@@ -2580,7 +2679,7 @@ can be cached.
     {
         -custom_filters_score => {
             query       => { foo => 'bar' },
-            score_mode  => 'first|max|total|avg',       # default 'first',
+            score_mode  => 'first|max|total|avg|min|multiply', # default 'first'
             filters     => [
                 {
                     filter => { tag => 'perl' },
@@ -2683,7 +2782,7 @@ a given point:
                 location      => { lat => 10, lon => 5 },
                 distance      => '5km',
                 normalize     => 1 | 0,
-                optimize_bbox => 1 | 0,
+                optimize_bbox => memory | indexed | none,
             }
         }
     }
@@ -2706,7 +2805,7 @@ filter, but expressed as a range:
                 include_lower   => 1 | 0,
                 include_upper   => 0 | 1
                 normalize       => 1 | 0,
-                optimize_bbox   => 1 | 0,
+                optimize_bbox   => memory | indexed | none,
             }
         }
     }
@@ -2728,7 +2827,8 @@ rectangle:
             -geo_bbox => {
                 top_left     => { lat => 9, lon => 4  },
                 bottom_right => { lat => 10, lon => 5 },
-                normalize    => 1 | 0
+                normalize    => 1 | 0,
+                type         => memory | indexed
             }
         }
     }
@@ -2769,12 +2869,35 @@ or:
 
 See L<Geo Polygon Filter|http://www.elasticsearch.org/guide/reference/query-dsl/geo-polygon-filter.html>
 
-=head1 TYPE/ID
+=head1 INDEX/TYPE/ID
 
-The C<_id> field is not indexed by default, and thus isn't
-available for normal queries or filters.
+=head2 -indices
+
+*** Query context only ***
+
+To run a different query depending on the index name, you can use the
+C<-indices> query:
+
+    {
+        -indices => {
+            indices         => 'one' | ['one','two],
+            query           => { status => 'active' },
+            no_match_query  => 'all' | 'none' | { another => query }
+        }
+    }
+
+The `no_match_query` will be run on any indices which don't appear in the
+specified list.  It defaults to C<all>, but can be set to C<none> or to
+a full query.
+
+See L<Indices Query|https://github.com/elasticsearch/elasticsearch/issues/1416>
+and L<no_match_query|https://github.com/elasticsearch/elasticsearch/issues/1492>
+for details.
 
 =head2 -ids
+
+The C<_id> field is not indexed by default, and thus isn't
+available for normal queries or filters
 
 Returns docs with the matching C<_id> or C<_type>/C<_id> combination:
 
@@ -2881,6 +3004,97 @@ C<-cache> or C<-nocache>:
 See L<Query DSL|http://www.elasticsearch.org/guide/reference/query-dsl/> for more
 details about what is cached by default and what is not.
 
+=head2 -cache_key
+
+It is also possible to use a name to identify a cached filter. For instance:
+
+    {
+        -cache_key => {
+            friends => { person_id => [1,2,3] },
+            enemies => { person_id => [4,5,6] },
+        }
+    }
+
+In the above example, the two filters will be joined by an C<and> filter. The
+following example will have the two filters joined by an C<or> filter:
+
+    {
+        -cache_key => [
+            friends => { person_id => [1,2,3] },
+            enemies => { person_id => [4,5,6] },
+        ]
+    }
+
+See L<_cache_key|http://www.elasticsearch.org/guide/reference/query-dsl/index.html> for
+more details.
+
+=head1 RAW ELASTICSEARCH QUERY DSL
+
+Sometimes, instead of using the SearchBuilder syntax, you may want to revert
+to the raw Query DSL that ElasticSearch uses.
+
+You can do this by passing a reference to a HASH ref, for instance:
+
+    $sb->query({
+        foo => 1,
+        -filter => \{ term => { bar => 2 }}
+    })
+
+Would result in:
+
+    {
+        query => {
+            filtered => {
+                query => {
+                    text => { foo => 1 }
+                },
+                filter => {
+                    term => { bar => 2 }
+                }
+            }
+        }
+    }
+
+An example with OR'ed filters:
+
+    $sb->filter([
+        foo => 1,
+        \{ term => { bar => 2 }}
+    ])
+
+Would result in:
+
+    {
+        filter => {
+            or => [
+                { term => { foo => 1 }},
+                { term => { bar => 2 }}
+            ]
+        }
+    }
+
+An example with AND'ed filters:
+
+    $sb->filter({
+        -and => [
+            foo => 1 ,
+            \{ term => { bar => 2 }}
+        ]
+    })
+
+Would result in:
+
+    {
+        filter => {
+            and => [
+                { term => { foo => 1 }},
+                { term => { bar => 2 }}
+            ]
+        }
+    }
+
+Wherever a filter or query is expected, passing a reference to a HASH-ref is
+accepted.
 
 =cut
 
@@ -3011,8 +3225,6 @@ for more about text queries.
 Clinton Gormley, C<< <drtech at cpan.org> >>
 
 =head1 BUGS
-
-This is a beta module, so the API may well change in the future.
 
 If you have any suggestions for improvements, or find any bugs, please report
 them to L<https://github.com/clintongormley/ElasticSearch-SearchBuilder/issues>.

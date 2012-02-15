@@ -288,6 +288,7 @@ for my $op (qw(-qs -query_string)) {
                 fuzzy_min_sim                => 0.5,
                 fuzzy_prefix_length          => 2,
                 lowercase_expanded_terms     => 1,
+                minimum_number_should_match  => 3,
                 phrase_slop                  => 10,
                 tie_breaker                  => 1.5,
                 use_dis_max                  => 1
@@ -306,6 +307,7 @@ for my $op (qw(-qs -query_string)) {
                 fuzzy_min_sim                => 0.5,
                 fuzzy_prefix_length          => 2,
                 lowercase_expanded_terms     => 1,
+                minimum_number_should_match  => 3,
                 phrase_slop                  => 10,
                 tie_breaker                  => 1.5,
                 use_dis_max                  => 1
@@ -344,6 +346,7 @@ for my $op (qw(-not_qs -not_query_string)) {
                 fuzzy_min_sim                => 0.5,
                 fuzzy_prefix_length          => 2,
                 lowercase_expanded_terms     => 1,
+                minimum_number_should_match  => 3,
                 phrase_slop                  => 10,
                 tie_breaker                  => 1.5,
                 use_dis_max                  => 1
@@ -364,6 +367,7 @@ for my $op (qw(-not_qs -not_query_string)) {
                             fuzzy_min_sim                => 0.5,
                             fuzzy_prefix_length          => 2,
                             lowercase_expanded_terms     => 1,
+                            minimum_number_should_match  => 3,
                             phrase_slop                  => 10,
                             tie_breaker                  => 1.5,
                             use_dis_max                  => 1
@@ -530,6 +534,26 @@ test_queries(
         }
     }
 
+);
+
+test_queries(
+    'UNARY OPERATOR: -custom_boost',
+
+    'custom_boost: V',
+    { -custom_boost => 'v' },
+    qr/HASHREF/,
+
+    'custom_boost: {}',
+    {   -custom_boost => {
+            query        => { k => 'v' },
+            boost_factor => 3
+        }
+    },
+    {   custom_boost_factor => {
+            query        => { text => { k => 'v' } },
+            boost_factor => 3
+        }
+    },
 );
 
 for my $op (qw(-dis_max -dismax)) {
@@ -774,6 +798,66 @@ test_queries(
     {   filtered => {
             query  => { text => { k => 'v' } },
             filter => { term => { k => 'v' } }
+        }
+    },
+);
+
+test_queries(
+    'UNARY OPERATOR: -indices',
+
+    '-indices: V',
+    { -indices => 'V' },
+    qr/HASHREF/,
+
+    '-indices: {}',
+    { -indices => { indices => 'foo', query => { foo => 1 } } },
+    { indices => { indices => ['foo'], query => { text => { foo => 1 } } } },
+
+    '-indices: {""}',
+    {   -indices =>
+            { indices => 'foo', query => { foo => 1 }, no_match_query => '' }
+    },
+    { indices => { indices => ['foo'], query => { text => { foo => 1 } } } },
+
+    '-indices: {none}',
+    {   -indices => {
+            indices        => 'foo',
+            query          => { foo => 1 },
+            no_match_query => 'none'
+        }
+    },
+    {   indices => {
+            indices        => ['foo'],
+            query          => { text => { foo => 1 } },
+            no_match_query => 'none'
+        }
+    },
+
+    '-indices: {all}',
+    {   -indices => {
+            indices        => 'foo',
+            query          => { foo => 1 },
+            no_match_query => 'all'
+        }
+    },
+    {   indices => {
+            indices        => ['foo'],
+            query          => { text => { foo => 1 } },
+            no_match_query => 'all'
+        }
+    },
+
+    '-indices: {query}',
+    {   -indices => {
+            indices        => 'foo',
+            query          => { foo => 1 },
+            no_match_query => { foo => 2 }
+        }
+    },
+    {   indices => {
+            indices        => ['foo'],
+            query          => { text => { foo => 1 } },
+            no_match_query => { text => { foo => 2 } }
         }
     },
 );
