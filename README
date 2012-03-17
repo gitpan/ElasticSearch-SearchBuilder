@@ -3,9 +3,9 @@ NAME
     ElasticSearch
 
 VERSION
-    Version 0.12
+    Version 0.13
 
-    Compatible with ElasticSearch version 0.19.0RC2
+    Compatible with ElasticSearch version 0.19.0
 
 DESCRIPTION
     The Query DSL for ElasticSearch (see Query DSL
@@ -525,6 +525,18 @@ EQUALITY
         # Field foo contains neither 'bar' nor 'baz'
         { foo => { '!=' => ['bar','baz'] }}
         { foo => { '<>' => ['bar','baz'] }}
+
+    The "terms" filter can take an "execution" parameter which affects how
+    the filter of multiple terms is executed and cached.
+
+    For instance:
+
+        { foo => {
+            -terms => {
+                value       => ['foo','bar'],
+                execution   => 'bool'
+            }
+        }}
 
     See Term Filter
     <http://www.elasticsearch.org/guide/reference/query-dsl/term-filter.html
