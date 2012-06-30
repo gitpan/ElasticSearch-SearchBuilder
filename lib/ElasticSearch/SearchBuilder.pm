@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 
 my %SPECIAL_OPS = (
     query => {
@@ -25,22 +25,22 @@ my %SPECIAL_OPS = (
         '*'   => [ 'wildcard',           0 ],
     },
     filter => {
-        '='           => [ 'terms',  0 ],
-        '!='          => [ 'terms',  1 ],
-        '<>'          => [ 'terms',  1 ],
-        '>'           => [ 'range',  0 ],
-        '>='          => [ 'range',  0 ],
-        '<'           => [ 'range',  0 ],
-        '<='          => [ 'range',  0 ],
-        'gt'          => [ 'range',  0 ],
-        'lt'          => [ 'range',  0 ],
-        'gte'         => [ 'range',  0 ],
-        'lte'         => [ 'range',  0 ],
-        '^'           => [ 'prefix', 0 ],
-        'exists'      => [ 'exists', 0 ],
-        'missing'     => [ 'exists', 0 ],
-        'not_exists'  => [ 'exists', 0 ],
-        'not_missing' => [ 'exists', 0 ],
+        '='           => [ 'terms',   0 ],
+        '!='          => [ 'terms',   1 ],
+        '<>'          => [ 'terms',   1 ],
+        '>'           => [ 'range',   0 ],
+        '>='          => [ 'range',   0 ],
+        '<'           => [ 'range',   0 ],
+        '<='          => [ 'range',   0 ],
+        'gt'          => [ 'range',   0 ],
+        'lt'          => [ 'range',   0 ],
+        'gte'         => [ 'range',   0 ],
+        'lte'         => [ 'range',   0 ],
+        '^'           => [ 'prefix',  0 ],
+        'exists'      => [ 'exists',  0 ],
+        'not_exists'  => [ 'exists',  0 ],
+        'missing'     => [ 'missing', 0 ],
+        'not_missing' => [ 'missing', 1 ],
     }
 );
 
@@ -553,8 +553,10 @@ sub _query_unary_query_string {
                             auto_generate_phrase_queries boost
                             default_operator enable_position_increments
                             fields fuzzy_min_sim fuzzy_prefix_length
+                            fuzzy_rewrite fuzzy_max_expansions
                             lowercase_expanded_terms phrase_slop
-                            tie_breaker use_dis_max
+                            tie_breaker use_dis_max lenient
+                            quote_analyzer quote_field_suffix
                             minimum_number_should_match )
                     ]
                 );
@@ -640,7 +642,8 @@ sub _query_unary_custom_filters_score {
         {   HASHREF => sub {
                 my $p = $self->_hash_params(
                     'custom_filters_score', $v,
-                    [ 'query', 'filters' ], ['score_mode']
+                    [ 'query',      'filters' ],
+                    [ 'score_mode', 'max_boost' ]
                 );
                 $p->{query} = $self->_recurse( 'query', $p->{query} );
                 my $raw = $p->{filters};
@@ -797,8 +800,22 @@ sub _query_unary_nested {
 #======================================================================
 
 #===================================
-sub _filter_unary_missing { shift->_filter_unary_exists( @_, 'missing' ) }
+sub _filter_unary_missing {
 #===================================
+    my ( $self, $v ) = @_;
+
+    return $self->_SWITCH_refkind(
+        "Unary filter -missing",
+        $v,
+        {   SCALAR  => sub { return { missing => { field => $v } } },
+            HASHREF => sub {
+                my $p = $self->_hash_params( 'missing', $v, ['field'],
+                    [ 'existence', 'null_value' ] );
+                return { missing => $p };
+            },
+        },
+    );
+}
 
 #===================================
 sub _filter_unary_exists {
@@ -998,14 +1015,19 @@ sub _query_field_wildcard {
 sub _query_field_fuzzy {
 #===================================
     shift->_query_field_generic( @_, 'fuzzy', ['value'],
-        [qw(boost min_similarity max_expansions prefix_length)] );
+        [qw(boost min_similarity max_expansions prefix_length rewrite)] );
 }
 
 #===================================
 sub _query_field_text {
 #===================================
-    shift->_query_field_generic( @_, 'text', ['query'],
-        [qw(boost operator analyzer fuzziness max_expansions prefix_length)]
+    shift->_query_field_generic(
+        @_, 'text',
+        ['query'],
+        [   qw(boost operator analyzer
+                fuzziness fuzzy_rewrite max_expansions
+                minimum_should_match prefix_length)
+        ]
     );
 }
 
@@ -1040,8 +1062,11 @@ sub _query_field_query_string {
         ['query'],
         [   qw(default_operator analyzer allow_leading_wildcard
                 lowercase_expanded_terms enable_position_increments
-                fuzzy_prefix_length fuzzy_min_sim phrase_slop boost
+                fuzzy_prefix_length lenient fuzzy_min_sim
+                fuzzy_rewrite fuzzy_max_expansions
+                phrase_slop boost
                 analyze_wildcard auto_generate_phrase_queries rewrite
+                quote_analyzer quote_field_suffix
                 minimum_number_should_match)
         ]
     );
@@ -1350,6 +1375,29 @@ sub _filter_field_exists {
 }
 
 #===================================
+sub _filter_field_missing {
+#===================================
+    my ( $self, $k, $op, $val ) = @_;
+    $val ||= 0;
+
+    return $self->_SWITCH_refkind(
+        "Filter field operator -$op",
+        $val,
+        {   SCALAR => sub {
+                return { ( $val ? 'missing' : 'exists' ) => { field => $k } };
+            },
+            HASHREF => sub {
+                my $p = $self->_hash_params( 'missing', $val, [],
+                    [ 'null_value', 'existence' ] );
+                $p->{field} = $k;
+                return { missing => $p };
+            },
+
+        }
+    );
+}
+
+#===================================
 sub _filter_field_geo_bbox {
 #===================================
     shift->_filter_field_geo_bounding_box( $_[0], 'geo_bbox', $_[2] );
@@ -1561,9 +1609,9 @@ ElasticSearch::SearchBuilder - A Perlish compact query language for ElasticSearc
 
 =head1 VERSION
 
-Version 0.13
+Version 0.14
 
-Compatible with ElasticSearch version 0.19.0
+Compatible with ElasticSearch version 0.19.7
 
 =cut
 
@@ -2044,13 +2092,15 @@ These operators all generate C<text> queries:
     # Same as above but with extra parameters:
     { title => {
         text => {
-            query          => 'Perl is GREAT',
-            boost          => 2.0,
-            operator       => 'and',
-            analyzer       => 'default',
-            fuzziness      => 0.5,
-            max_expansions => 100,
-            prefix_length  => 2,
+            query                => 'Perl is GREAT',
+            boost                => 2.0,
+            operator             => 'and',
+            analyzer             => 'default',
+            fuzziness            => 0.5,
+            fuzzy_rewrite        => 'constant_score_default',
+            max_expansions       => 100,
+            minimum_should_match => 2,
+            prefix_length        => 2,
         }
     }}
 
@@ -2233,6 +2283,26 @@ particular field exists and has a value, or is undefined or has no value:
     { -missing => 'foo'           }
     { foo      => undef           }
 
+The C<missing> filter also supports the C<null_value> and C<existence>
+parameters:
+
+    {
+        foo     => {
+            missing => {
+                null_value => 1,
+                existence  => 1,
+            }
+        }
+    }
+
+OR
+
+    { -missing => {
+        field      => 'foo',
+        null_value => 1,
+        existence  => 1,
+    }}
+
 See L<Missing Filter|http://www.elasticsearch.org/guide/reference/query-dsl/missing-filter.html>
 and L<Exists Filter|http://www.elasticsearch.org/guide/reference/query-dsl/exists-filter.html>
 
@@ -2269,14 +2339,19 @@ L<ElasticSearch::QueryParser> to fix any syntax errors.
             allow_leading_wildcard       => 0,
             lowercase_expanded_terms     => 1,
             enable_position_increments   => 1,
-            fuzzy_prefix_length          => 2,
             fuzzy_min_sim                => 0.5,
+            fuzzy_prefix_length          => 2,
+            fuzzy_rewrite                => 'constant_score_default',
+            fuzzy_max_expansions         => 1024,
+            lenient                      => 1,
             phrase_slop                  => 10,
             boost                        => 2,
             analyze_wildcard             => 1,
             auto_generate_phrase_queries => 0,
             rewrite                      => 'constant_score_default',
             minimum_number_should_match  => 3,
+            quote_analyzer               => 'standard',
+            quote_field_suffix           => '.unstemmed'
         }
     }}
 
@@ -2291,8 +2366,11 @@ against multiple fields:
             allow_leading_wildcard       => 0,
             lowercase_expanded_terms     => 1,
             enable_position_increments   => 1,
-            fuzzy_prefix_length          => 2,
             fuzzy_min_sim                => 0.5,
+            fuzzy_prefix_length          => 2,
+            fuzzy_rewrite                => 'constant_score_default',
+            fuzzy_max_expansions         => 1024,
+            lenient                      => 1,
             phrase_slop                  => 10,
             boost                        => 2,
             analyze_wildcard             => 1,
@@ -2300,6 +2378,8 @@ against multiple fields:
             use_dis_max                  => 1,
             tie_breaker                  => 0.7,
             minimum_number_should_match  => 3,
+            quote_analyzer               => 'standard',
+            quote_field_suffix           => '.unstemmed'
     }}
 
 See L<Query-string Query|http://www.elasticsearch.org/guide/reference/query-dsl/query-string-query.html>
@@ -2514,7 +2594,8 @@ where similarity is based on the Levenshtein (edit distance) algorithm:
             value           => 'fonbaz',
             boost           => 2.0,
             min_similarity  => 0.2,
-            max_expansions  => 10
+            max_expansions  => 10,
+            rewrite         => 'constant_score_default',
         }
     }}
 
@@ -2705,6 +2786,7 @@ can be cached.
         -custom_filters_score => {
             query       => { foo => 'bar' },
             score_mode  => 'first|max|total|avg|min|multiply', # default 'first'
+            max_boost   => 10,
             filters     => [
                 {
                     filter => { tag => 'perl' },

@@ -117,25 +117,29 @@ for my $op (qw(= text)) {
         'K: $op {}',
         {   k => {
                 $op => {
-                    query          => 'v',
-                    boost          => 1,
-                    operator       => 'AND',
-                    analyzer       => 'default',
-                    fuzziness      => 0.5,
-                    max_expansions => 10,
-                    prefix_length  => 2,
+                    query                => 'v',
+                    boost                => 1,
+                    operator             => 'AND',
+                    analyzer             => 'default',
+                    fuzzy_rewrite        => 'constant_score_default',
+                    fuzziness            => 0.5,
+                    max_expansions       => 10,
+                    minimum_should_match => 2,
+                    prefix_length        => 2,
                 }
             }
         },
         {   text => {
                 k => {
-                    analyzer       => 'default',
-                    boost          => 1,
-                    fuzziness      => '0.5',
-                    max_expansions => 10,
-                    operator       => 'AND',
-                    prefix_length  => 2,
-                    query          => 'v'
+                    analyzer             => 'default',
+                    boost                => 1,
+                    fuzziness            => '0.5',
+                    fuzzy_rewrite        => 'constant_score_default',
+                    max_expansions       => 10,
+                    minimum_should_match => 2,
+                    operator             => 'AND',
+                    prefix_length        => 2,
+                    query                => 'v'
                 }
             }
         },
@@ -181,13 +185,15 @@ for my $op (qw(!= <> not_text)) {
         'K: $op {}',
         {   k => {
                 $op => {
-                    query          => 'v',
-                    boost          => 1,
-                    operator       => 'AND',
-                    analyzer       => 'default',
-                    fuzziness      => 0.5,
-                    max_expansions => 10,
-                    prefix_length  => 2,
+                    query                => 'v',
+                    boost                => 1,
+                    operator             => 'AND',
+                    analyzer             => 'default',
+                    fuzziness            => 0.5,
+                    fuzzy_rewrite        => 'constant_score_default',
+                    max_expansions       => 10,
+                    minimum_should_match => 2,
+                    prefix_length        => 2,
                 }
             }
         },
@@ -198,10 +204,12 @@ for my $op (qw(!= <> not_text)) {
                                 analyzer       => 'default',
                                 boost          => 1,
                                 fuzziness      => '0.5',
+                                fuzzy_rewrite  => 'constant_score_default',
                                 max_expansions => 10,
-                                operator       => 'AND',
-                                prefix_length  => 2,
-                                query          => 'v'
+                                minimum_should_match => 2,
+                                operator             => 'AND',
+                                prefix_length        => 2,
+                                query                => 'v'
                             }
                         }
                     }
@@ -860,7 +868,8 @@ for my $op (qw(fuzzy)) {
                     boost          => 1,
                     min_similarity => 0.5,
                     max_expansions => 10,
-                    prefix_length  => 2
+                    prefix_length  => 2,
+                    rewrite        => 'constant_score_default',
                 }
             }
         },
@@ -870,7 +879,8 @@ for my $op (qw(fuzzy)) {
                     boost          => 1,
                     min_similarity => 0.5,
                     max_expansions => 10,
-                    prefix_length  => 2
+                    prefix_length  => 2,
+                    rewrite        => 'constant_score_default',
                 }
             }
         },
@@ -921,7 +931,8 @@ for my $op (qw(not_fuzzy)) {
                     boost          => 1,
                     min_similarity => 0.5,
                     max_expansions => 10,
-                    prefix_length  => 2
+                    prefix_length  => 2,
+                    rewrite        => 'constant_score_default',
                 }
             }
         },
@@ -933,7 +944,8 @@ for my $op (qw(not_fuzzy)) {
                                 boost          => 1,
                                 min_similarity => 0.5,
                                 max_expansions => 10,
-                                prefix_length  => 2
+                                prefix_length  => 2,
+                                rewrite        => 'constant_score_default',
                             }
                         }
                     }
@@ -1421,12 +1433,17 @@ for my $op (qw(query_string qs)) {
                     enable_position_increments   => 1,
                     fuzzy_prefix_length          => 2,
                     fuzzy_min_sim                => 0.5,
+                    fuzzy_rewrite                => 'constant_score_default',
+                    fuzzy_max_expansions         => 1024,
+                    lenient                      => 1,
                     phrase_slop                  => 10,
                     boost                        => 1,
                     analyze_wildcard             => 1,
                     auto_generate_phrase_queries => 0,
                     rewrite                      => 'constant_score_default',
                     minimum_number_should_match  => 3,
+                    quote_analyzer               => 'standard',
+                    quote_field_suffix           => '.unstemmed'
 
                 }
             }
@@ -1441,12 +1458,17 @@ for my $op (qw(query_string qs)) {
                     enable_position_increments   => 1,
                     fuzzy_prefix_length          => 2,
                     fuzzy_min_sim                => 0.5,
+                    fuzzy_rewrite                => 'constant_score_default',
+                    fuzzy_max_expansions         => 1024,
+                    lenient                      => 1,
                     phrase_slop                  => 10,
                     boost                        => 1,
                     analyze_wildcard             => 1,
                     auto_generate_phrase_queries => 0,
                     rewrite                      => 'constant_score_default',
                     minimum_number_should_match  => 3,
+                    quote_analyzer               => 'standard',
+                    quote_field_suffix           => '.unstemmed'
                 }
             }
         },
@@ -1506,11 +1528,16 @@ for my $op (qw(not_query_string not_qs)) {
                     enable_position_increments   => 1,
                     fuzzy_prefix_length          => 2,
                     fuzzy_min_sim                => 0.5,
+                    fuzzy_rewrite                => 'constant_score_default',
+                    fuzzy_max_expansions         => 1024,
+                    lenient                      => 1,
                     phrase_slop                  => 10,
                     boost                        => 1,
                     analyze_wildcard             => 1,
                     auto_generate_phrase_queries => 0,
                     rewrite                      => 'constant_score_default',
+                    quote_analyzer               => 'standard',
+                    quote_field_suffix           => '.unstemmed'
                 }
             }
         },
@@ -1518,19 +1545,24 @@ for my $op (qw(not_query_string not_qs)) {
                 must_not => [ {
                         field => {
                             k => {
-                                query                        => 'v',
-                                default_operator             => 'AND',
-                                analyzer                     => 'default',
-                                allow_leading_wildcard       => 0,
-                                lowercase_expanded_terms     => 1,
-                                enable_position_increments   => 1,
-                                fuzzy_prefix_length          => 2,
-                                fuzzy_min_sim                => 0.5,
+                                query                      => 'v',
+                                default_operator           => 'AND',
+                                analyzer                   => 'default',
+                                allow_leading_wildcard     => 0,
+                                lowercase_expanded_terms   => 1,
+                                enable_position_increments => 1,
+                                fuzzy_prefix_length        => 2,
+                                fuzzy_min_sim              => 0.5,
+                                fuzzy_rewrite => 'constant_score_default',
+                                fuzzy_max_expansions         => 1024,
+                                lenient                      => 1,
                                 phrase_slop                  => 10,
                                 boost                        => 1,
                                 analyze_wildcard             => 1,
                                 auto_generate_phrase_queries => 0,
-                                rewrite => 'constant_score_default',
+                                rewrite        => 'constant_score_default',
+                                quote_analyzer => 'standard',
+                                quote_field_suffix => '.unstemmed'
                             }
                         }
                     }
@@ -1557,7 +1589,7 @@ sub test_queries {
             eval {
                 eq_or_diff scalar $a->query($in), { query => $out }, $name;
                 1;
-            }
+                }
                 or die "*** FAILED TEST $name:***\n$@";
         }
     }
