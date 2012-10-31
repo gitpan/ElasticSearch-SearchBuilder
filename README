@@ -3,9 +3,15 @@ NAME
     ElasticSearch
 
 VERSION
-    Version 0.14
+    Version 0.16
 
-    Compatible with ElasticSearch version 0.19.7
+    Compatible with ElasticSearch version 0.19.11
+
+BREAKING CHANGE
+    The 'text' queries have been renamed 'match' queries in elasticsearch
+    0.19.9. If you need support for an older version of elasticsearch,
+    please use
+    <https://metacpan.org/release/DRTECH/ElasticSearch-SearchBuilder-0.15/>.
 
 DESCRIPTION
     The Query DSL for ElasticSearch (see Query DSL
@@ -55,7 +61,7 @@ METHODS
     $compact_query can be a scalar, a hash ref or an array ref.
 
         $sb->query('foo')
-        # { "query" : { "text" : { "_all" : "foo" }}}
+        # { "query" : { "match" : { "_all" : "foo" }}}
 
         $sb->query({ ... }) or $sb->query([ ... ])
         # { "query" : { ... }}
@@ -141,7 +147,7 @@ INTRODUCTION
         # query field content for 'brown cow', and filter documents
         # where status is 'active' and tags contains the term 'perl'
         {
-            content => { text => 'brown cow' },
+            content => 'brown cow',
             -filter => {
                 status => 'active',
                 tags   => 'perl'
@@ -163,14 +169,14 @@ INTRODUCTION
 
         # query field content for 'brown cow', and filter documents
         # where status is 'active', tags contains the term 'perl'
-        # and a text query on field title contains 'important'
+        # and a match query on field title contains 'important'
         {
-            content => { text => 'brown cow' },
+            content => 'brown cow',
             -filter => {
                 status => 'active',
                 tags   => 'perl',
                 -query => {
-                    title => { text => 'important' }
+                    title => 'important'
                 }
             }
         }
@@ -181,7 +187,7 @@ INTRODUCTION
 
   KEY-VALUE PAIRS
     Key-value pairs are equivalent to the "=" operator, discussed below.
-    They are converted to "text" queries or "term" filters:
+    They are converted to "match" queries or "term" filters:
 
         # Field 'foo' contains term 'bar'
         # equiv: { foo => { '=' => 'bar' }}
@@ -348,7 +354,7 @@ INTRODUCTION
 
             # Search fields 'title' and 'content' for text 'brown cow'
             {
-                -query_string => {
+                -match => {
                     query   => 'brown cow',
                     fields  => ['title','content']
                 }
@@ -408,45 +414,47 @@ EQUALITY
     term?"
 
     Filter equality operators work only with exact terms, while query
-    equality operators (the "text" family of queries) will "do the right
+    equality operators (the "match" family of queries) will "do the right
     thing", ie work with terms for "not_analyzed" fields and with analyzed
     text for "analyzed" fields.
 
   EQUALITY (QUERIES)
-   = | -text | != | <> | -not_text
-    These operators all generate "text" queries:
+   = | -match | != | <> | -not_match
+    These operators all generate "match" queries:
 
         # Analyzed field 'title' contains the terms 'Perl is GREAT'
         # (which is analyzed to the terms 'perl','great')
         { title => 'Perl is GREAT' }
         { title => { '='  => 'Perl is GREAT' }}
-        { title => { text => 'Perl is GREAT' }}
+        { title => { match => 'Perl is GREAT' }}
 
         # Not_analyzed field 'status' contains the EXACT term 'ACTIVE'
         { status => 'ACTIVE' }
         { status => { '='  => 'ACTIVE' }}
-        { status => { text => 'ACTIVE' }}
+        { status => { match => 'ACTIVE' }}
 
         # Same as above but with extra parameters:
         { title => {
-            text => {
+            match => {
                 query                => 'Perl is GREAT',
                 boost                => 2.0,
                 operator             => 'and',
                 analyzer             => 'default',
                 fuzziness            => 0.5,
                 fuzzy_rewrite        => 'constant_score_default',
+                lenient              => 1,
                 max_expansions       => 100,
                 minimum_should_match => 2,
                 prefix_length        => 2,
             }
         }}
 
-    Operators "<>", "!=" and "not_text" are synonyms for each other and just
-    wrap the operator in a "not" clause.
+    Operators "<>", "!=" and "not_match" are synonyms for each other and
+    just wrap the operator in a "not" clause.
 
-    See Text Query
-    <http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+    See Match Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html
+    >
 
    == | -phrase | -not_phrase
     These operators look for a complete phrase.
@@ -472,14 +480,48 @@ EQUALITY
                 slop     => 3,
                 analyzer => 'default'
                 boost    => 1,
+                lenient  => 1,
         }}
 
-    See Text Query
-    <http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+    See Match Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html
+    >
+
+   Multi-field -match | -not_match
+    To run a "match" | "=", "phrase" or "phrase_prefix" query against
+    multiple fields, you can use the "-match" unary operator:
+
+        {
+            -match => {
+                query                => "Quick Fox",
+                type                 => 'boolean',
+                fields               => ['content','title'],
+
+                use_dis_max          => 1,
+                tie_breaker          => 0.7,
+
+                boost                => 2.0,
+                operator             => 'and',
+                analyzer             => 'default',
+                fuzziness            => 0.5,
+                fuzzy_rewrite        => 'constant_score_default',
+                lenient              => 1,
+                max_expansions       => 100,
+                minimum_should_match => 2,
+                prefix_length        => 2,
+            }
+        }
+
+    The "type" parameter can be "boolean" (equivalent of "match" | "=")
+    which is the default, "phrase" or "phrase_prefix".
+
+    See Multi-match Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/multi-match-quer
+    y.html>.
 
    -term | -terms | -not_term | -not_terms
     The "term"/"terms" operators are provided for completeness. You should
-    almost always use the "text"/"=" operator instead.
+    almost always use the "match"/"=" operator instead.
 
     There are only two use cases:
 
@@ -646,17 +688,17 @@ MISSING OR NULL VALUES
 FULL TEXT SEARCH
     *** Query context only ***
 
-    For most full text search queries, the "text" queries are what you want.
-    These analyze the search terms, and look for documents that contain one
-    or more of those terms. (See "EQUALITY (QUERIES)").
+    For most full text search queries, the "match" queries are what you
+    want. These analyze the search terms, and look for documents that
+    contain one or more of those terms. (See "EQUALITY (QUERIES)").
 
   -qs | -query_string | -not_qs | -not_query_string
     However, there is a more advanced query string syntax (see Lucene Query
     Parser Syntax
-    <http://lucene.apache.org/java/3_3_0/queryparsersyntax.html>) which
-    understands search terms like:
+    <http://lucene.apache.org/core/old_versioned_docs/versions/3_5_0/querypa
+    rsersyntax.html>) which understands search terms like:
 
-       perl AND python tag:recent "must have this phrase" -apple
+       perl AND python tag:recent "this exact phrase" -apple
 
     It is useful for "power" users, but has the disadvantage that, if the
     syntax is incorrect, ES throws an error. You can use
@@ -685,7 +727,7 @@ FULL TEXT SEARCH
                 analyze_wildcard             => 1,
                 auto_generate_phrase_queries => 0,
                 rewrite                      => 'constant_score_default',
-                minimum_number_should_match  => 3,
+                minimum_should_match         => 3,
                 quote_analyzer               => 'standard',
                 quote_field_suffix           => '.unstemmed'
             }
@@ -713,7 +755,7 @@ FULL TEXT SEARCH
                 auto_generate_phrase_queries => 0,
                 use_dis_max                  => 1,
                 tie_breaker                  => 0.7,
-                minimum_number_should_match  => 3,
+                minimum_should_match         => 3,
                 quote_analyzer               => 'standard',
                 quote_field_suffix           => '.unstemmed'
         }}
@@ -811,10 +853,10 @@ FULL TEXT SEARCH
 PREFIX
   PREFIX (QUERIES)
    ^ | -phrase_prefix | -not_phrase_prefix
-    These operators use the "text_phrase_prefix" query.
+    These operators use the "match_phrase_prefix" query.
 
     For "analyzed" fields, it analyzes the search terms, and does a
-    "text_phrase" query, with a "prefix" query on the last term. Think
+    "match_phrase" query, with a "prefix" query on the last term. Think
     "auto-complete".
 
     For "not_analyzed" fields, this behaves the same as the term-based
@@ -845,7 +887,7 @@ PREFIX
         }}
 
     See
-    http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html
+    http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html
 
    -prefix | -not_prefix
     The "prefix" query is a term-based query - no analysis takes place, even
@@ -998,8 +1040,8 @@ COMBINING QUERIES
     matches, but the results are "less relevant".
 
         { -boosting => {
-            positive       => { title => { text => 'apple pear'     }},
-            negative       => { title => { text => 'apple computer' }},
+            positive       => { title => 'apple pear'     },
+            negative       => { title => 'apple computer' },
             negative_boost => 0.2
         }}
 
@@ -1040,12 +1082,13 @@ NESTED QUERIES/FILTERS
     However, if "tags" is mapped as a "nested" field, then you can run
     queries or filters on each sub-doc individually.
 
-    See Nested Mapping
-    <http://github.com/elasticsearch/elasticsearch/issues/1095>, Nested Type
-    <http://www.elasticsearch.org/guide/reference/mapping/nested-type.html>
-    and Nested Query
+    See Nested Type
+    <http://www.elasticsearch.org/guide/reference/mapping/nested-type.html>,
+    Nested Query
     <http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.htm
-    l>
+    l> and Nested Filter
+    <http://www.elasticsearch.org/guide/reference/query-dsl/nested-filter.ht
+    ml>
 
   -nested (QUERY)
         {
@@ -1061,7 +1104,8 @@ NESTED QUERIES/FILTERS
         }
 
     See Nested Query
-    <http://github.com/elasticsearch/elasticsearch/issues/1095>
+    <http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.htm
+    l>
 
   -nested (FILTER)
         {
@@ -1078,7 +1122,8 @@ NESTED QUERIES/FILTERS
         }
 
     See Nested Filter
-    <http://github.com/elasticsearch/elasticsearch/issues/1102>
+    <http://www.elasticsearch.org/guide/reference/query-dsl/nested-filter.ht
+    ml>
 
 SCRIPTING
     ElasticSearch supports the use of scripts to customise query or filter
@@ -1175,6 +1220,25 @@ PARENT/CHILD
     See Parent Field
     <http://www.elasticsearch.org/guide/reference/mapping/parent-field.html>
     for more.
+
+  -has_parent | -not_has_parent
+    Find child documents that have a parent document which matches a query.
+
+        # Find parent docs whose children of type 'comment' have the tag 'perl'
+        {
+            -has_parent => {
+                type   => 'comment',
+                query  => { tag => 'perl' },
+                _scope => 'my_scope',
+                boost  => 1,                    # Query context only
+            }
+        }
+
+    See Has Parent Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/has-parent-query
+    .html> and See Has Parent Filter
+    <http://www.elasticsearch.org/guide/reference/query-dsl/has-parent-filte
+    r.html>.
 
   -has_child | -not_has_child
     Find parent documents that have child documents which match a query.
@@ -1345,10 +1409,28 @@ INDEX/TYPE/ID
     a full query.
 
     See Indices Query
-    <https://github.com/elasticsearch/elasticsearch/issues/1416> and
-    no_match_query
-    <https://github.com/elasticsearch/elasticsearch/issues/1492> for
-    details.
+    <http://www.elasticsearch.org/guide/reference/query-dsl/indices-query.ht
+    ml>.
+
+    *** Filter context only ***
+
+    To run a different filter depending on the index name, you can use the
+    "-indices" filter:
+
+        {
+            -indices => {
+                indices         => 'one' | ['one','two],
+                filter          => { status => 'active' },
+                no_match_filter => 'all' | 'none' | { another => filter }
+            }
+        }
+
+    The `no_match_filter` will be run on any indices which don't appear in
+    the specified list. It defaults to "all", but can be set to "none" or to
+    a full filter.
+
+    See Indices Filter
+    <https://github.com/elasticsearch/elasticsearch/issues/1787>.
 
   -ids
     The "_id" field is not indexed by default, and thus isn't available for
@@ -1402,7 +1484,7 @@ LIMIT
     on:
 
         {
-            name    => { text => 'Joe Bloggs },
+            name    => "Joe Bloggs",
             -filter => { -limit => 100       }
         }
 
@@ -1443,7 +1525,7 @@ CACHING FILTERS
 
         # Don't cache the term filter for 'status'
         {
-            content => { text => 'interesting post'},
+            content => 'interesting post',
             -filter => {
                 -nocache => { status => 'active' }
             }
@@ -1451,7 +1533,7 @@ CACHING FILTERS
 
         # Do cache the numeric range filter:
         {
-            content => { text => 'interesting post'},
+            content => 'interesting post',
             -filter => {
                 -cache => { created => {'>' => '2010-01-01' } }
             }
@@ -1503,7 +1585,7 @@ RAW ELASTICSEARCH QUERY DSL
             query => {
                 filtered => {
                     query => {
-                        text => { foo => 1 }
+                        match => { foo => 1 }
                     },
                     filter => {
                         term => { bar => 2 }
@@ -1606,7 +1688,7 @@ ELASTICSEARCH CONCEPTS
     different, and the query won't succeed.
 
     For instance, a "term" query for "GREATEST" wouldn't work, but
-    "greatest" would work. However, a "text" query for "GREATEST" would
+    "greatest" would work. However, a "match" query for "GREATEST" would
     work, because the search text would be analyzed to produce the same
     terms that are stored in the index.
 
@@ -1614,30 +1696,30 @@ ELASTICSEARCH CONCEPTS
     <http://www.elasticsearch.org/guide/reference/index-modules/analysis/>
     for the list of supported analyzers.
 
-  "text" QUERIES
-    ElasticSearch has a family of DWIM queries called "text" queries.
+  "match" QUERIES
+    ElasticSearch has a family of DWIM queries called "match" queries.
 
     Their action depends upon how the field has been defined. If a field is
-    "analyzed" (the default for string fields) then the "text" queries
+    "analyzed" (the default for string fields) then the "match" queries
     analyze the search terms before doing the search:
 
         # Convert "Perl is GREAT" to the terms 'perl','great' and search
         # the 'content' field for those terms
 
-        { text: { content: "Perl is GREAT" }}
+        { match: { content: "Perl is GREAT" }}
 
     If a field is "not_analyzed", then it treats the search terms as a
     single term:
 
         # Find all docs where the 'status' field contains EXACTLY the term 'ACTIVE'
-        { text: { status: "ACTIVE" }}
+        { match: { status: "ACTIVE" }}
 
-    Filters, on the other hand, don't have "text" queries - filters operate
-    on simple terms instead.
+    Filters, on the other hand, don't have full text queries - filters
+    operate on simple terms instead.
 
-    See Text Query
-    <http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
-    for more about text queries.
+    See Match Query
+    <http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html
+    > for more about match queries.
 
 AUTHOR
     Clinton Gormley, "<drtech at cpan.org>"

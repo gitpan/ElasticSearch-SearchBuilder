@@ -5,24 +5,24 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.15';
+our $VERSION = '0.16';
 
 my %SPECIAL_OPS = (
     query => {
-        '='   => [ 'text',               0 ],
-        '=='  => [ 'text_phrase',        0 ],
-        '!='  => [ 'text',               1 ],
-        '<>'  => [ 'text',               1 ],
-        '>'   => [ 'range',              0 ],
-        '>='  => [ 'range',              0 ],
-        '<'   => [ 'range',              0 ],
-        '<='  => [ 'range',              0 ],
-        'gt'  => [ 'range',              0 ],
-        'lt'  => [ 'range',              0 ],
-        'gte' => [ 'range',              0 ],
-        'lte' => [ 'range',              0 ],
-        '^'   => [ 'text_phrase_prefix', 0 ],
-        '*'   => [ 'wildcard',           0 ],
+        '='   => [ 'match',               0 ],
+        '=='  => [ 'match_phrase',        0 ],
+        '!='  => [ 'match',               1 ],
+        '<>'  => [ 'match',               1 ],
+        '>'   => [ 'range',               0 ],
+        '>='  => [ 'range',               0 ],
+        '<'   => [ 'range',               0 ],
+        '<='  => [ 'range',               0 ],
+        'gt'  => [ 'range',               0 ],
+        'lt'  => [ 'range',               0 ],
+        'gte' => [ 'range',               0 ],
+        'lte' => [ 'range',               0 ],
+        '^'   => [ 'match_phrase_prefix', 0 ],
+        '*'   => [ 'wildcard',            0 ],
     },
     filter => {
         '='           => [ 'terms',   0 ],
@@ -153,7 +153,7 @@ sub _top_SCALAR {
 #===================================
     my ( $self, $type, $params ) = @_;
     return $type eq 'query'
-        ? { text => { _all => $params } }
+        ? { match => { _all => $params } }
         : { term => { _all => $params } };
 }
 
@@ -250,7 +250,7 @@ sub _hashpair_SCALAR {
 #===================================
     my ( $self, $type, $k, $v ) = @_;
     return $type eq 'query'
-        ? { text => { $k => $v } }
+        ? { match => { $k => $v } }
         : { term => { $k => $v } };
 }
 
@@ -393,6 +393,7 @@ sub _query_unary_and { shift->_unary_and( 'query', shift, 'and' ) }
 sub _query_unary_not { shift->_unary_not( 'query', shift, ) }
 sub _query_unary_ids { shift->_unary_ids( 'query', shift ) }
 sub _query_unary_has_child { shift->_unary_child( 'query', shift ) }
+sub _query_unary_has_parent { shift->_unary_parent( 'query', shift ) }
 #===================================
 
 #===================================
@@ -402,6 +403,7 @@ sub _filter_unary_and { shift->_unary_and( 'filter', shift, 'and' ) }
 sub _filter_unary_not { shift->_unary_not( 'filter', shift, ) }
 sub _filter_unary_ids { shift->_unary_ids( 'filter', shift ) }
 sub _filter_unary_has_child { shift->_unary_child( 'filter', shift ) }
+sub _filter_unary_has_parent { shift->_unary_parent( 'filter', shift ) }
 #===================================
 
 #===================================
@@ -527,9 +529,54 @@ sub _unary_child {
     );
 }
 
+#===================================
+sub _unary_parent {
+#===================================
+    my ( $self, $type, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary $type -has_parent",
+        $v,
+        {   HASHREF => sub {
+                my $p = $self->_hash_params(
+                    'has_parent', $v,
+                    [ 'query', 'type' ],
+                    $type eq 'query' ? [ 'boost', '_scope' ] : ['_scope']
+                );
+                $p->{query} = $self->_recurse( 'query', $p->{query} );
+                return { has_parent => $p };
+            },
+        }
+    );
+}
+
 #======================================================================
 # Query only unary ops
 #======================================================================
+
+#===================================
+sub _query_unary_match {
+#===================================
+    my ( $self, $v, $op ) = @_;
+    $op ||= 'match';
+    return $self->_SWITCH_refkind(
+        "Unary query -$op",
+        $v,
+        {   HASHREF => sub {
+                my $p = $self->_hash_params(
+                    $op, $v,
+                    [ 'query', 'fields' ],
+                    [ qw(
+                            use_dis_max tie_breaker
+                            boost operator analyzer fuzziness fuzzy_rewrite
+                            rewrite max_expansions minimum_should_match
+                            prefix_length lenient slop type)
+                    ]
+                );
+                return { "multi_match" => $p };
+            },
+        }
+    );
+}
 
 #===================================
 sub _query_unary_qs { shift->_query_unary_query_string( @_, 'qs' ) }
@@ -557,7 +604,7 @@ sub _query_unary_query_string {
                             lowercase_expanded_terms phrase_slop
                             tie_breaker use_dis_max lenient
                             quote_analyzer quote_field_suffix
-                            minimum_number_should_match )
+                            minimum_should_match )
                     ]
                 );
                 return { query_string => $p };
@@ -835,6 +882,34 @@ sub _filter_unary_exists {
 }
 
 #===================================
+sub _filter_unary_indices {
+#===================================
+    my ( $self, $v ) = @_;
+    return $self->_SWITCH_refkind(
+        "Unary filter -indices",
+        $v,
+        {   HASHREF => sub {
+                my $p
+                    = $self->_hash_params( 'indices', $v,
+                    [ 'indices', 'filter' ],
+                    ['no_match_filter'] );
+                $p->{indices} = [ $p->{indices} ]
+                    unless ref $p->{indices} eq 'ARRAY';
+                $p->{filter} = $self->_recurse( 'filter', $p->{filter} );
+                my $no = delete $p->{no_match_filter};
+                if ($no) {
+                    $p->{no_match_filter}
+                        = $no =~ /^(?:all|none)$/
+                        ? $no
+                        : $self->_recurse( 'filter', $no );
+                }
+                return { indices => $p };
+            },
+        }
+    );
+}
+
+#===================================
 sub _filter_unary_type {
 #===================================
     my ( $self, $v ) = @_;
@@ -1022,35 +1097,35 @@ sub _query_field_fuzzy {
 }
 
 #===================================
-sub _query_field_text {
+sub _query_field_match {
 #===================================
     shift->_query_field_generic(
-        @_, 'text',
+        @_, 'match',
         ['query'],
         [   qw(boost operator analyzer
-                fuzziness fuzzy_rewrite max_expansions
-                minimum_should_match prefix_length)
+                fuzziness fuzzy_rewrite rewrite max_expansions
+                minimum_should_match prefix_length lenient)
         ]
     );
 }
 
 #===================================
-sub _query_field_phrase        { shift->_query_field_text_phrase(@_) }
-sub _query_field_phrase_prefix { shift->_query_field_text_phrase_prefix(@_) }
+sub _query_field_phrase        { shift->_query_field_match_phrase(@_) }
+sub _query_field_phrase_prefix { shift->_query_field_match_phrase_prefix(@_) }
 #===================================
 
 #===================================
-sub _query_field_text_phrase {
+sub _query_field_match_phrase {
 #===================================
-    shift->_query_field_generic( @_, 'text_phrase', ['query'],
-        [qw(boost slop analyzer)] );
+    shift->_query_field_generic( @_, 'match_phrase', ['query'],
+        [qw(boost analyzer slop lenient)] );
 }
 
 #===================================
-sub _query_field_text_phrase_prefix {
+sub _query_field_match_phrase_prefix {
 #===================================
-    shift->_query_field_generic( @_, 'text_phrase_prefix', ['query'],
-        [qw(boost analyzer slop max_expansions)] );
+    shift->_query_field_generic( @_, 'match_phrase_prefix', ['query'],
+        [qw(boost analyzer slop lenient max_expansions)] );
 }
 
 #===================================
@@ -1070,7 +1145,7 @@ sub _query_field_query_string {
                 phrase_slop boost
                 analyze_wildcard auto_generate_phrase_queries rewrite
                 quote_analyzer quote_field_suffix
-                minimum_number_should_match)
+                minimum_should_match)
         ]
     );
 }
@@ -1615,11 +1690,17 @@ ElasticSearch::SearchBuilder - A Perlish compact query language for ElasticSearc
 
 =head1 VERSION
 
-Version 0.14
+Version 0.16
 
-Compatible with ElasticSearch version 0.19.7
+Compatible with ElasticSearch version 0.19.11
 
 =cut
+
+=head1 BREAKING CHANGE
+
+The 'text' queries have been renamed 'match' queries in
+elasticsearch 0.19.9. If you need support for an older version of elasticsearch,
+please use L<https://metacpan.org/release/DRTECH/ElasticSearch-SearchBuilder-0.15/>.
 
 =head1 DESCRIPTION
 
@@ -1680,7 +1761,7 @@ Returns a query in the ElasticSearch query DSL.
 C<$compact_query> can be a scalar, a hash ref or an array ref.
 
     $sb->query('foo')
-    # { "query" : { "text" : { "_all" : "foo" }}}
+    # { "query" : { "match" : { "_all" : "foo" }}}
 
     $sb->query({ ... }) or $sb->query([ ... ])
     # { "query" : { ... }}
@@ -1788,7 +1869,7 @@ Switch from query context to filter context:
     # query field content for 'brown cow', and filter documents
     # where status is 'active' and tags contains the term 'perl'
     {
-        content => { text => 'brown cow' },
+        content => 'brown cow',
         -filter => {
             status => 'active',
             tags   => 'perl'
@@ -1808,14 +1889,14 @@ Use a query as a filter:
 
     # query field content for 'brown cow', and filter documents
     # where status is 'active', tags contains the term 'perl'
-    # and a text query on field title contains 'important'
+    # and a match query on field title contains 'important'
     {
-        content => { text => 'brown cow' },
+        content => 'brown cow',
         -filter => {
             status => 'active',
             tags   => 'perl',
             -query => {
-                title => { text => 'important' }
+                title => 'important'
             }
         }
     }
@@ -1825,7 +1906,7 @@ See L<Query Filter|http://www.elasticsearch.org/guide/reference/query-dsl/query-
 =head2 KEY-VALUE PAIRS
 
 Key-value pairs are equivalent to the C<=> operator, discussed below. They are
-converted to C<text> queries or C<term> filters:
+converted to C<match> queries or C<term> filters:
 
     # Field 'foo' contains term 'bar'
     # equiv: { foo => { '=' => 'bar' }}
@@ -2003,7 +2084,7 @@ An operator might apply to multiple fields:
 
     # Search fields 'title' and 'content' for text 'brown cow'
     {
-        -query_string => {
+        -match => {
             query   => 'brown cow',
             fields  => ['title','content']
         }
@@ -2074,46 +2155,47 @@ relevance can be read from that field (at the cost of a slower execution time):
 These operators answer the question: "Does this field contain this term?"
 
 Filter equality operators work only with exact terms, while query equality
-operators (the C<text> family of queries) will "do the right thing", ie
+operators (the C<match> family of queries) will "do the right thing", ie
 work with terms for C<not_analyzed> fields and with analyzed text for
 C<analyzed> fields.
 
 =head2 EQUALITY (QUERIES)
 
-=head3 = | -text | != | <> | -not_text
+=head3 = | -match | != | <> | -not_match
 
-These operators all generate C<text> queries:
+These operators all generate C<match> queries:
 
     # Analyzed field 'title' contains the terms 'Perl is GREAT'
     # (which is analyzed to the terms 'perl','great')
     { title => 'Perl is GREAT' }
     { title => { '='  => 'Perl is GREAT' }}
-    { title => { text => 'Perl is GREAT' }}
+    { title => { match => 'Perl is GREAT' }}
 
     # Not_analyzed field 'status' contains the EXACT term 'ACTIVE'
     { status => 'ACTIVE' }
     { status => { '='  => 'ACTIVE' }}
-    { status => { text => 'ACTIVE' }}
+    { status => { match => 'ACTIVE' }}
 
     # Same as above but with extra parameters:
     { title => {
-        text => {
+        match => {
             query                => 'Perl is GREAT',
             boost                => 2.0,
             operator             => 'and',
             analyzer             => 'default',
             fuzziness            => 0.5,
             fuzzy_rewrite        => 'constant_score_default',
+            lenient              => 1,
             max_expansions       => 100,
             minimum_should_match => 2,
             prefix_length        => 2,
         }
     }}
 
-Operators C<< <> >>, C<!=> and C<not_text> are synonyms for each other and
+Operators C<< <> >>, C<!=> and C<not_match> are synonyms for each other and
 just wrap the operator in a C<not> clause.
 
-See L<Text Query|http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+See L<Match Query|http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html>
 
 =head3 == | -phrase | -not_phrase
 
@@ -2140,14 +2222,46 @@ same order, but further apart:
             slop     => 3,
             analyzer => 'default'
             boost    => 1,
+            lenient  => 1,
     }}
 
-See L<Text Query|http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
+See L<Match Query|http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html>
+
+=head3 Multi-field -match | -not_match
+
+To run a C<match> | C<=>, C<phrase> or C<phrase_prefix> query against
+multiple fields, you can use the C<-match> unary operator:
+
+    {
+        -match => {
+            query                => "Quick Fox",
+            type                 => 'boolean',
+            fields               => ['content','title'],
+
+            use_dis_max          => 1,
+            tie_breaker          => 0.7,
+
+            boost                => 2.0,
+            operator             => 'and',
+            analyzer             => 'default',
+            fuzziness            => 0.5,
+            fuzzy_rewrite        => 'constant_score_default',
+            lenient              => 1,
+            max_expansions       => 100,
+            minimum_should_match => 2,
+            prefix_length        => 2,
+        }
+    }
+
+The C<type> parameter can be C<boolean> (equivalent of C<match> | C<=>)
+which is the default, C<phrase> or C<phrase_prefix>.
+
+See L<Multi-match Query|http://www.elasticsearch.org/guide/reference/query-dsl/multi-match-query.html>.
 
 =head3 -term | -terms | -not_term | -not_terms
 
 The C<term>/C<terms> operators are provided for completeness.  You
-should almost always use the C<text>/C<=> operator instead.
+should almost always use the C<match>/C<=> operator instead.
 
 There are only two use cases:
 
@@ -2316,17 +2430,17 @@ and L<Exists Filter|http://www.elasticsearch.org/guide/reference/query-dsl/exist
 
 *** Query context only ***
 
-For most full text search queries, the C<text> queries are what you
+For most full text search queries, the C<match> queries are what you
 want.  These analyze the search terms, and look for documents that
 contain one or more of those terms. (See L</"EQUALITY (QUERIES)">).
 
 =head2 -qs | -query_string | -not_qs | -not_query_string
 
 However, there is a more advanced query string syntax
-(see L<Lucene Query Parser Syntax|http://lucene.apache.org/java/3_3_0/queryparsersyntax.html>)
+(see L<Lucene Query Parser Syntax|http://lucene.apache.org/core/old_versioned_docs/versions/3_5_0/queryparsersyntax.html>)
 which understands search terms like:
 
-   perl AND python tag:recent "must have this phrase" -apple
+   perl AND python tag:recent "this exact phrase" -apple
 
 It is useful for "power" users, but has the disadvantage that, if
 the syntax is incorrect, ES throws an error.  You can use
@@ -2355,7 +2469,7 @@ L<ElasticSearch::QueryParser> to fix any syntax errors.
             analyze_wildcard             => 1,
             auto_generate_phrase_queries => 0,
             rewrite                      => 'constant_score_default',
-            minimum_number_should_match  => 3,
+            minimum_should_match         => 3,
             quote_analyzer               => 'standard',
             quote_field_suffix           => '.unstemmed'
         }
@@ -2383,7 +2497,7 @@ against multiple fields:
             auto_generate_phrase_queries => 0,
             use_dis_max                  => 1,
             tie_breaker                  => 0.7,
-            minimum_number_should_match  => 3,
+            minimum_should_match         => 3,
             quote_analyzer               => 'standard',
             quote_field_suffix           => '.unstemmed'
     }}
@@ -2482,10 +2596,10 @@ and L<FLT Query|http://www.elasticsearch.org/guide/reference/query-dsl/flt-query
 
 =head3 ^ | -phrase_prefix | -not_phrase_prefix
 
-These operators use the C<text_phrase_prefix> query.
+These operators use the C<match_phrase_prefix> query.
 
 For C<analyzed> fields, it analyzes the search terms, and does a
-C<text_phrase> query, with a C<prefix> query on the last term.
+C<match_phrase> query, with a C<prefix> query on the last term.
 Think "auto-complete".
 
 For C<not_analyzed> fields, this behaves the same as the term-based
@@ -2515,7 +2629,7 @@ With extra options
         }
     }}
 
-See http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html
+See http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html
 
 =head3 -prefix | -not_prefix
 
@@ -2670,8 +2784,8 @@ Unlike the C<must_not> clause of a C<bool> query, the query still matches,
 but the results are "less relevant".
 
     { -boosting => {
-        positive       => { title => { text => 'apple pear'     }},
-        negative       => { title => { text => 'apple computer' }},
+        positive       => { title => 'apple pear'     },
+        negative       => { title => 'apple computer' },
         negative_boost => 0.2
     }}
 
@@ -2710,9 +2824,9 @@ with the number C<5>
 However, if C<tags> is mapped as a C<nested> field, then you can run queries
 or filters on each sub-doc individually.
 
-See L<Nested Mapping|http://github.com/elasticsearch/elasticsearch/issues/1095>,
-L<Nested Type|http://www.elasticsearch.org/guide/reference/mapping/nested-type.html>
-and L<Nested Query|http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.html>
+See L<Nested Type|http://www.elasticsearch.org/guide/reference/mapping/nested-type.html>,
+L<Nested Query|http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.html>
+and L<Nested Filter|http://www.elasticsearch.org/guide/reference/query-dsl/nested-filter.html>
 
 =head2 -nested (QUERY)
 
@@ -2728,7 +2842,7 @@ and L<Nested Query|http://www.elasticsearch.org/guide/reference/query-dsl/nested
         }
     }
 
-See L<Nested Query|http://github.com/elasticsearch/elasticsearch/issues/1095>
+See L<Nested Query|http://www.elasticsearch.org/guide/reference/query-dsl/nested-query.html>
 
 =head2 -nested (FILTER)
 
@@ -2745,7 +2859,7 @@ See L<Nested Query|http://github.com/elasticsearch/elasticsearch/issues/1095>
         }
     }
 
-See L<Nested Filter|http://github.com/elasticsearch/elasticsearch/issues/1102>
+See L<Nested Filter|http://www.elasticsearch.org/guide/reference/query-dsl/nested-filter.html>
 
 =head1 SCRIPTING
 
@@ -2838,6 +2952,23 @@ relationships.
 
 See L<Parent Field|http://www.elasticsearch.org/guide/reference/mapping/parent-field.html>
 for more.
+
+=head2 -has_parent | -not_has_parent
+
+Find child documents that have a parent document which matches a query.
+
+    # Find parent docs whose children of type 'comment' have the tag 'perl'
+    {
+        -has_parent => {
+            type   => 'comment',
+            query  => { tag => 'perl' },
+            _scope => 'my_scope',
+            boost  => 1,                    # Query context only
+        }
+    }
+
+See L<Has Parent Query|http://www.elasticsearch.org/guide/reference/query-dsl/has-parent-query.html>
+and See L<Has Parent Filter|http://www.elasticsearch.org/guide/reference/query-dsl/has-parent-filter.html>.
 
 =head2 -has_child | -not_has_child
 
@@ -3003,9 +3134,26 @@ The `no_match_query` will be run on any indices which don't appear in the
 specified list.  It defaults to C<all>, but can be set to C<none> or to
 a full query.
 
-See L<Indices Query|https://github.com/elasticsearch/elasticsearch/issues/1416>
-and L<no_match_query|https://github.com/elasticsearch/elasticsearch/issues/1492>
-for details.
+See L<Indices Query|http://www.elasticsearch.org/guide/reference/query-dsl/indices-query.html>.
+
+*** Filter context only ***
+
+To run a different filter depending on the index name, you can use the
+C<-indices> filter:
+
+    {
+        -indices => {
+            indices         => 'one' | ['one','two],
+            filter          => { status => 'active' },
+            no_match_filter => 'all' | 'none' | { another => filter }
+        }
+    }
+
+The `no_match_filter` will be run on any indices which don't appear in the
+specified list.  It defaults to C<all>, but can be set to C<none> or to
+a full filter.
+
+See L<Indices Filter|https://github.com/elasticsearch/elasticsearch/issues/1787>.
 
 =head2 -ids
 
@@ -3058,7 +3206,7 @@ See L<Type Filter|http://www.elasticsearch.org/guide/reference/query-dsl/type-fi
 The C<limit> filter limits the number of documents (per shard) to execute on:
 
     {
-        name    => { text => 'Joe Bloggs },
+        name    => "Joe Bloggs",
         -filter => { -limit => 100       }
     }
 
@@ -3100,7 +3248,7 @@ C<-cache> or C<-nocache>:
 
     # Don't cache the term filter for 'status'
     {
-        content => { text => 'interesting post'},
+        content => 'interesting post',
         -filter => {
             -nocache => { status => 'active' }
         }
@@ -3108,7 +3256,7 @@ C<-cache> or C<-nocache>:
 
     # Do cache the numeric range filter:
     {
-        content => { text => 'interesting post'},
+        content => 'interesting post',
         -filter => {
             -cache => { created => {'>' => '2010-01-01' } }
         }
@@ -3159,7 +3307,7 @@ Would result in:
         query => {
             filtered => {
                 query => {
-                    text => { foo => 1 }
+                    match => { foo => 1 }
                 },
                 filter => {
                     term => { bar => 2 }
@@ -3299,37 +3447,37 @@ and for the search terms, otherwise the resulting terms may be different,
 and the query won't succeed.
 
 For instance, a C<term> query for C<GREATEST> wouldn't work, but C<greatest>
-would work.  However, a C<text> query for C<GREATEST> would work, because
+would work.  However, a C<match> query for C<GREATEST> would work, because
 the search text would be analyzed to produce the same terms that are stored
 in the index.
 
 See L<Analysis|http://www.elasticsearch.org/guide/reference/index-modules/analysis/>
 for the list of supported analyzers.
 
-=head2 C<text> QUERIES
+=head2 C<match> QUERIES
 
-ElasticSearch has a family of DWIM queries called C<text> queries.
+ElasticSearch has a family of DWIM queries called C<match> queries.
 
 Their action depends upon how the field has been defined. If a field is
-C<analyzed> (the default for string fields) then the C<text> queries analyze
+C<analyzed> (the default for string fields) then the C<match> queries analyze
 the search terms before doing the search:
 
     # Convert "Perl is GREAT" to the terms 'perl','great' and search
     # the 'content' field for those terms
 
-    { text: { content: "Perl is GREAT" }}
+    { match: { content: "Perl is GREAT" }}
 
 If a field is C<not_analyzed>, then it treats the search terms as a single
 term:
 
     # Find all docs where the 'status' field contains EXACTLY the term 'ACTIVE'
-    { text: { status: "ACTIVE" }}
+    { match: { status: "ACTIVE" }}
 
-Filters, on the other hand, don't have C<text> queries - filters operate on
+Filters, on the other hand, don't have full text queries - filters operate on
 simple terms instead.
 
-See L<Text Query|http://www.elasticsearch.org/guide/reference/query-dsl/text-query.html>
-for more about text queries.
+See L<Match Query|http://www.elasticsearch.org/guide/reference/query-dsl/match-query.html>
+for more about match queries.
 
 =cut
 
