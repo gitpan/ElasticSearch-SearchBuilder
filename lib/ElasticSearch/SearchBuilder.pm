@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Scalar::Util ();
 
-our $VERSION = '0.16';
+our $VERSION = '0.17';
 
 my %SPECIAL_OPS = (
     query => {
@@ -1559,7 +1559,7 @@ sub _top_recurse {
     croak "Too many params passed to ${type}()"
         if @_;
     my $clause = $self->_recurse( $type, $params );
-    return $clause ? { $type => $clause } : ();
+    return $clause ? { $type => $clause } : undef;
 }
 
 #===================================
