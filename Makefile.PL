@@ -12,7 +12,8 @@ my %WriteMakefileArgs = (
   "ABSTRACT" => "A Perlish compact query language for ElasticSearch",
   "AUTHOR" => "Clinton Gormley <drtech\@cpan.org>",
   "BUILD_REQUIRES" => {
-    "Test::Differences" => 0,
+    "Data::Dump" => 0,
+    "Test::Deep" => 0,
     "Test::Exception" => 0,
     "Test::More" => "0.96"
   },
@@ -29,7 +30,7 @@ my %WriteMakefileArgs = (
     "strict" => 0,
     "warnings" => 0
   },
-  "VERSION" => "0.17",
+  "VERSION" => "0.18",
   "test" => {
     "TESTS" => "t/*.t"
   }

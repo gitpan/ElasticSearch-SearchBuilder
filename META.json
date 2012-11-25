@@ -34,7 +34,8 @@
       },
       "test" : {
          "requires" : {
-            "Test::Differences" : "0",
+            "Data::Dump" : "0",
+            "Test::Deep" : "0",
             "Test::Exception" : "0",
             "Test::More" : "0"
          }
@@ -51,6 +52,6 @@
          "web" : "https://github.com/clintongormley/ElasticSearch-SearchBuilder"
       }
    },
-   "version" : "0.17"
+   "version" : "0.18"
 }
 
