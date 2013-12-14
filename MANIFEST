@@ -5,10 +5,8 @@ META.json
 META.yml
 Makefile.PL
 README
+cpanfile
 dist.ini
-doc/ElasticSearch::SearchBuilder
-doc/static/script.js
-doc/static/styles.css
 lib/ElasticSearch/SearchBuilder.pm
 t/00-basic.t
 t/01-filters-field-ops.t
